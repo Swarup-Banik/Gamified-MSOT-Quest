@@ -1,9 +1,11 @@
 import { createServer } from './server.js';
+import { runSeed } from './scripts/seed.js';
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
 const HOST = '0.0.0.0';
 
 async function main() {
+  await runSeed();
   const server = await createServer();
   try {
     await server.listen({ port: PORT, host: HOST });
