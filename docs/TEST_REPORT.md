@@ -1,6 +1,6 @@
 # MSOT Quest — Official Master Test Report
 
-Generated: 2026-10-10T07:52:41.145Z  
+Generated: 2026-10-10T08:06:34.821Z  
 Environment: Node.js v22.23.2 | Mac OS | Production Simulation Mode  
 Result: **ALL TEST SUITES PASSED (26 / 26 AUTOMATED TESTS GREEN)**
 
@@ -103,9 +103,9 @@ Benchmarks executed against Fastify REST API and Redis real-time pipeline:
 
 | Concurrency (VUs) | Total Requests | Successful | Error Rate | p50 Latency | p90 Latency | p95 Latency | Max Latency | Throughput |
 |---|---|---|---|---|---|---|---|---|
-| **100 VUs** | 100 | 100 | **0%** | 15 ms | 15 ms | **15 ms** | 16 ms | 6250 req/s |
-| **300 VUs** | 300 | 300 | **0%** | 24 ms | 24 ms | **24 ms** | 24 ms | 12500 req/s |
-| **500 VUs** | 500 | 500 | **0%** | 37 ms | 37 ms | **37 ms** | 37 ms | 13514 req/s |
+| **100 VUs** | 100 | 100 | **0%** | 16 ms | 16 ms | **16 ms** | 19 ms | 5263 req/s |
+| **300 VUs** | 300 | 300 | **0%** | 22 ms | 23 ms | **23 ms** | 23 ms | 13043 req/s |
+| **500 VUs** | 500 | 500 | **0%** | 27 ms | 27 ms | **27 ms** | 27 ms | 18519 req/s |
 
 ### 8.2 300-Student Simultaneous Team Battle Burst Test
 
