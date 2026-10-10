@@ -2,6 +2,7 @@
   "name": "msot-quest",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "MSOT Quest - Gamified Learning Platform",
   "workspaces": [
     "packages/*",

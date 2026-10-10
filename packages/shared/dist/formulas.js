@@ -106,8 +106,12 @@ function generateAnonymousAlias(studentId) {
  * Calculates Z-Score of a given value against cohort or student history
  */
 function calculateZScore(value, mean, stdDev) {
-    if (stdDev <= 0)
-        return 0;
+    if (stdDev <= 0) {
+        if (value === mean)
+            return 0;
+        // Fallback to relative ratio as surrogate z-score if baseline had 0 variance
+        return (value - mean) / Math.max(1, mean * 0.15);
+    }
     return (value - mean) / stdDev;
 }
 /**
