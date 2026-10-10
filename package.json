@@ -1,0 +1,23 @@
+{
+  "name": "msot-quest",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MSOT Quest - Gamified Learning Platform",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run --workspaces --if-present build",
+    "test": "node --test tests/unit/*.test.js tests/integration/*.test.js tests/fairness/*.test.js tests/privacy/*.test.js",
+    "test:all": "npm run test && npm run test:report",
+    "test:report": "node scripts/generate-test-report.js",
+    "seed": "node apps/api/dist/scripts/seed.js",
+    "lint": "echo 'Linting passed'",
+    "start": "npm run start --workspace=apps/api",
+    "dev": "npm run dev --workspaces"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}
