@@ -323,7 +323,32 @@ export const api = {
 
   // Cosmetics & Mystery Chests
   getCosmeticsCatalog: (studentId: string = 'student_1') =>
-    fetchJson<{ catalog: any[] }>(`/cosmetics/catalog?studentId=${studentId}`),
+    fetchJson<{
+      catalog: any[];
+      equippedLoadout: any;
+      completionBySlot: Record<string, { owned: number; total: number; percent: number }>;
+      totalCompletionPercent: number;
+      spendableShards: number;
+    }>(`/cosmetics/catalog?studentId=${studentId}`),
+
+  getMyCosmetics: (studentId: string = 'student_1') =>
+    fetchJson<{
+      cosmetics: any[];
+      equippedLoadout: any;
+      spendableShards: number;
+    }>(`/me/cosmetics?studentId=${studentId}`),
+
+  equipCosmetic: (cosmeticId: string, studentId?: string, slot?: string) =>
+    fetchJson<{ success: boolean; equippedLoadout: any; message: string }>('/me/cosmetics/equip', {
+      method: 'POST',
+      body: JSON.stringify({ cosmeticId, studentId, slot }),
+    }),
+
+  unequipCosmetic: (slot: string, studentId?: string) =>
+    fetchJson<{ success: boolean; equippedLoadout: any }>('/me/cosmetics/unequip', {
+      method: 'POST',
+      body: JSON.stringify({ slot, studentId }),
+    }),
 
   getChests: (studentId: string = 'student_1') =>
     fetchJson<{ chests: any[]; pity: any }>(`/chests?studentId=${studentId}`),
@@ -338,6 +363,25 @@ export const api = {
     fetchJson<any>('/cosmetics/craft', {
       method: 'POST',
       body: JSON.stringify({ studentId, cosmeticId }),
+    }),
+
+  // Game Master Demo Helpers
+  grantRandomCosmetic: (studentId: string = 'student_1') =>
+    fetchJson<any>('/admin/demo/grant-cosmetic', {
+      method: 'POST',
+      body: JSON.stringify({ studentId }),
+    }),
+
+  grantDemoChest: (tier: string = 'GOLDEN', studentId: string = 'student_1') =>
+    fetchJson<any>('/admin/demo/grant-chest', {
+      method: 'POST',
+      body: JSON.stringify({ tier, studentId }),
+    }),
+
+  resetStarterLoadout: (studentId: string = 'student_1') =>
+    fetchJson<any>('/admin/demo/reset-starter-loadout', {
+      method: 'POST',
+      body: JSON.stringify({ studentId }),
     }),
 
   // Faculty Dashboard

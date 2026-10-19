@@ -454,6 +454,10 @@ export async function runSeed(): Promise<{
     });
   }
 
+  // 13. Backfill starter kits and chests for students
+  await cosmeticsService.backfillAllStudentsStarterKit();
+  await cosmeticsService.grantChest('student_1', 'GOLDEN', "Founder's Welcome Vault");
+
   console.log(`✅ Seed Complete: ${studentIdCounter - 1} students, ${campuses.length} campuses, ${questionCount} questions, ${topics.length} topics.`);
 
   return {

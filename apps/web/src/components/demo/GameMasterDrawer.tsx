@@ -157,6 +157,30 @@ export function GameMasterDrawer({
     }
   };
 
+  const handleGrantCosmetic = async () => {
+    soundManager.play('tap');
+    try {
+      const item = await api.grantRandomCosmetic();
+      soundManager.play('correct');
+      showStatus(`Granted random cosmetic: ${item.name} (${item.rarity})`);
+    } catch (err: any) {
+      soundManager.play('wrong');
+      showStatus(`Grant failed: ${err.message}`);
+    }
+  };
+
+  const handleResetLoadout = async () => {
+    soundManager.play('tap');
+    try {
+      await api.resetStarterLoadout();
+      soundManager.play('correct');
+      showStatus('Reset student loadout to default starter kit');
+    } catch (err: any) {
+      soundManager.play('wrong');
+      showStatus(`Reset failed: ${err.message}`);
+    }
+  };
+
   return (
     <>
       {/* Discreet Developer / Judge Toggle in Bottom Right */}
@@ -320,6 +344,22 @@ export function GameMasterDrawer({
                     >
                       <Gift className="w-4 h-4 text-[#7CF36B]" />
                       <span>Award Vault</span>
+                    </button>
+
+                    <button
+                      onClick={handleGrantCosmetic}
+                      className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-left font-semibold text-white flex items-center gap-2"
+                    >
+                      <Palette className="w-4 h-4 text-[#FFD23F]" />
+                      <span>Grant Cosmetic</span>
+                    </button>
+
+                    <button
+                      onClick={handleResetLoadout}
+                      className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-left font-semibold text-white flex items-center gap-2"
+                    >
+                      <RotateCcw className="w-4 h-4 text-[#22E3FF]" />
+                      <span>Reset Loadout</span>
                     </button>
                   </div>
 

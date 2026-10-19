@@ -18,6 +18,8 @@ import {
 import { api } from '../lib/api';
 import { soundManager } from '../lib/sound-manager';
 import { CompanionAvatar } from './assets/CompanionAvatar';
+import { AvatarComposer } from './assets/AvatarComposer';
+import { FrameGenerator } from './assets/FrameGenerator';
 
 interface LeaguesAndBattlesProps {
   user: any;
@@ -187,6 +189,19 @@ export function LeaguesAndBattles({ user, profile, onRefreshProfile }: LeaguesAn
                       >
                         {entry.rank}
                       </span>
+
+                      {/* Framed Avatar */}
+                      <div className="relative shrink-0">
+                        <FrameGenerator
+                          frameKey={entry.equippedLoadout?.frame || 'frame_rustic_wood'}
+                          size={38}
+                        >
+                          <AvatarComposer
+                            avatarKey={entry.equippedLoadout?.avatar || entry.avatarId || 'avatar_fox_novice'}
+                            size={30}
+                          />
+                        </FrameGenerator>
+                      </div>
 
                       <div>
                         <div className="flex items-center gap-2">

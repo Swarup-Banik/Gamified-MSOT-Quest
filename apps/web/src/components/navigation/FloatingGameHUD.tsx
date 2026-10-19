@@ -9,6 +9,9 @@ import {
   IconXpMedallion,
 } from '../ui/GameIcons';
 import { CompanionAvatar } from '../assets/CompanionAvatar';
+import { AvatarComposer } from '../assets/AvatarComposer';
+import { FrameGenerator } from '../assets/FrameGenerator';
+import { FlameGenerator } from '../assets/FlameGenerator';
 import { soundManager } from '../../lib/sound-manager';
 
 interface FloatingGameHUDProps {
@@ -33,6 +36,10 @@ export function FloatingGameHUD({
   const lifetimeXp = profile?.lifetimeXp ?? 1420;
   const currentLevel = profile?.currentLevel ?? 3;
 
+  const equippedAvatar = user?.equippedLoadout?.avatar || profile?.equippedLoadout?.avatar || 'avatar_fox_novice';
+  const equippedFrame = user?.equippedLoadout?.frame || profile?.equippedLoadout?.frame || 'frame_rustic_wood';
+  const equippedFlame = user?.equippedLoadout?.streakFlame || profile?.equippedLoadout?.streakFlame || 'flame_warm_lantern';
+
   const handleStatClick = (sheet: 'LEVEL' | 'STREAK' | 'SHARDS' | 'NOTIFICATIONS') => {
     soundManager.play('tap');
     setActiveSheet(sheet);
@@ -49,12 +56,9 @@ export function FloatingGameHUD({
             className="flex items-center gap-2 cursor-pointer group transition-transform hover:scale-105 active:scale-95"
           >
             <div className="relative">
-              {/* Level Ring */}
-              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full p-0.5 bg-gradient-to-tr from-[#FFD23F] via-[#FF8A2B] to-[#FF3D9A] shadow-md">
-                <div className="w-full h-full rounded-full bg-[#24104F] flex items-center justify-center overflow-hidden">
-                  <CompanionAvatar species="fox" mood="happy" size={36} />
-                </div>
-              </div>
+              <FrameGenerator frameKey={equippedFrame} size={46}>
+                <AvatarComposer avatarKey={equippedAvatar} size={36} />
+              </FrameGenerator>
               {/* Level Badge Number */}
               <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#FFD23F] text-[#24104F] border-2 border-[#24104F] font-display text-[10px] font-bold flex items-center justify-center shadow">
                 {currentLevel}
@@ -99,7 +103,7 @@ export function FloatingGameHUD({
             onClick={() => handleStatClick('STREAK')}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-2xl bg-[#5B2EE0]/30 hover:bg-[#5B2EE0]/50 border border-[#FF8A2B]/40 transition active:scale-95 shadow-sm"
           >
-            <IconFlameMedallion size={26} />
+            <FlameGenerator flameKey={equippedFlame} size={24} animate={false} />
             <div className="text-left">
               <span className="font-display text-sm sm:text-base text-[#FFD23F] leading-none block">
                 {currentStreak}

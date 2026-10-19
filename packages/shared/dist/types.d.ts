@@ -1,5 +1,14 @@
 export type UserRole = 'STUDENT' | 'FACULTY' | 'ADMIN';
 export type UserStatus = 'INVITED' | 'PENDING_APPROVAL' | 'EMAIL_VERIFICATION_PENDING' | 'EMAIL_VERIFIED' | 'CONSENTED' | 'PROFILE_SETUP' | 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
+export interface EquippedLoadout {
+    avatar: string;
+    companion: string;
+    banner: string;
+    frame: string;
+    title?: string;
+    streakFlame?: string;
+    levelupEffect?: string;
+}
 export interface User {
     id: string;
     email: string;
@@ -9,6 +18,7 @@ export interface User {
     name: string;
     fullName?: string;
     avatarId: string;
+    equippedLoadout?: EquippedLoadout;
     anonymousAlias: string;
     isAnonymous: boolean;
     campusId: string;
@@ -30,6 +40,7 @@ export interface StudentProfile {
     maxStreak: number;
     freezeCount: number;
     lastActiveDate: string | null;
+    equippedLoadout?: EquippedLoadout;
     personalBests: {
         maxDailyXp: number;
         highestStreak: number;
@@ -207,16 +218,25 @@ export interface TeamEvent {
     }[];
 }
 export type CosmeticRarity = 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
-export type CosmeticType = 'AVATAR_SKIN' | 'COMPANION_SKIN' | 'FRAME' | 'TITLE' | 'BACKGROUND' | 'STREAK_FLAME' | 'LEVELUP_EFFECT';
+export type CosmeticSlot = 'AVATAR_SKIN' | 'COMPANION_SKIN' | 'PROFILE_BANNER' | 'FRAME' | 'TITLE' | 'STREAK_FLAME' | 'LEVELUP_EFFECT';
+export type CosmeticType = CosmeticSlot | 'BACKGROUND';
+export type UnlockType = 'starter' | 'chest' | 'achievement' | 'season' | 'quest';
 export interface Cosmetic {
     id: string;
+    slug: string;
     name: string;
-    type: CosmeticType;
+    slot: CosmeticSlot;
+    type?: CosmeticSlot;
     rarity: CosmeticRarity;
+    description: string;
     shardCost: number;
-    achievementLocked: boolean;
+    unlockType: UnlockType;
+    unlockCondition?: string;
+    achievementLocked?: boolean;
     requiredAchievement?: string;
-    previewUrl: string;
+    assetKey: string;
+    themeTag: string;
+    previewUrl?: string;
 }
 export type ChestTier = 'WOODEN' | 'SILVER' | 'GOLDEN' | 'LEGENDARY';
 export interface Chest {

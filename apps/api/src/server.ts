@@ -1630,7 +1630,16 @@ export async function createServer(): Promise<FastifyInstance> {
       if (!profile) {
         profile = await xpEngine.recalculateProfile(studentId);
       }
+      if (!profile.equippedLoadout || !profile.equippedLoadout.avatar) {
+        await cosmeticsService.grantStarterKit(studentId);
+        profile = (await db.getStudentProfile(studentId)) || profile;
+      }
       const user = db.users.get(studentId);
+      if (user && (!user.equippedLoadout || !user.equippedLoadout.avatar) && profile.equippedLoadout) {
+        user.equippedLoadout = { ...profile.equippedLoadout };
+        user.avatarId = profile.equippedLoadout.avatar;
+        db.users.set(studentId, user);
+      }
       return { profile, user };
     }
   );
@@ -1920,6 +1929,8 @@ export async function createServer(): Promise<FastifyInstance> {
           displayName: masked.displayName,
           studentId: masked.studentId,
           isAnonymous: masked.isAnonymous,
+          equippedLoadout: entryUser.equippedLoadout || db.studentProfiles.get(entry.studentId)?.equippedLoadout,
+          avatarId: entryUser.avatarId || entryUser.equippedLoadout?.avatar || 'cosm_avatar_fox_starter',
         };
       }
       return entry;
@@ -1999,17 +2010,89 @@ export async function createServer(): Promise<FastifyInstance> {
     return await cosmeticsService.openChest(req.params.id, req.body.studentId);
   });
 
-  app.get('/api/cosmetics/catalog', async (req: FastifyRequest<{
-    Querystring: { studentId?: string };
-  }>) => {
+  // --- COSMETICS & LOADOUT ENDPOINTS ---
+
+  // 1. Full Catalogue with completion rates and lock silhouettes
+  const handleGetCatalog = async (req: FastifyRequest<{ Querystring: { studentId?: string } }>) => {
     const caller = extractUser(req);
-    const studentId = req.query.studentId || caller?.id || 'student_1';
-    const all = Array.from(db.cosmetics.values());
-    const ownedIds = new Set(
-      db.userCosmetics.filter(uc => uc.studentId === studentId).map(uc => uc.cosmeticId)
-    );
-    const catalog = all.map(c => ({ ...c, isOwned: ownedIds.has(c.id) }));
-    return { catalog };
+    const targetStudentId = (caller?.role === 'STUDENT' ? caller.id : req.query.studentId) || caller?.id || 'student_1';
+    return await cosmeticsService.getCatalogForStudent(targetStudentId);
+  };
+  app.get('/api/cosmetics/catalog', handleGetCatalog);
+  app.get('/cosmetics/catalog', handleGetCatalog);
+
+  // 2. Owned cosmetics & equipped loadout
+  const handleGetOwnedCosmetics = async (req: FastifyRequest<{ Querystring: { studentId?: string } }>) => {
+    const caller = extractUser(req);
+    const targetStudentId = (caller?.role === 'STUDENT' ? caller.id : req.query.studentId) || caller?.id || 'student_1';
+    return await cosmeticsService.getOwnedCosmetics(targetStudentId);
+  };
+  app.get('/api/me/cosmetics', handleGetOwnedCosmetics);
+  app.get('/me/cosmetics', handleGetOwnedCosmetics);
+  app.get('/api/cosmetics/me', handleGetOwnedCosmetics);
+  app.get('/cosmetics/me', handleGetOwnedCosmetics);
+
+  // 3. Equip a cosmetic
+  const handleEquipCosmetic = async (
+    req: FastifyRequest<{ Body: { cosmeticId: string; studentId?: string; slot?: string } }>,
+    reply: FastifyReply
+  ) => {
+    const caller = extractUser(req);
+    const targetStudentId = (caller?.role === 'STUDENT' ? caller.id : req.body?.studentId) || caller?.id || req.body?.studentId;
+    if (!targetStudentId) {
+      return reply.status(401).send({ error: 'Authentication required' });
+    }
+    try {
+      const result = await cosmeticsService.equipCosmetic(targetStudentId, req.body.cosmeticId, req.body.slot);
+      return result;
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  };
+  app.post('/api/me/cosmetics/equip', handleEquipCosmetic);
+  app.post('/me/cosmetics/equip', handleEquipCosmetic);
+  app.post('/api/cosmetics/equip', handleEquipCosmetic);
+  app.post('/cosmetics/equip', handleEquipCosmetic);
+
+  // 4. Unequip a slot
+  const handleUnequipCosmetic = async (
+    req: FastifyRequest<{ Body: { slot: any; studentId?: string } }>,
+    reply: FastifyReply
+  ) => {
+    const caller = extractUser(req);
+    const targetStudentId = (caller?.role === 'STUDENT' ? caller.id : req.body?.studentId) || caller?.id || req.body?.studentId;
+    if (!targetStudentId) {
+      return reply.status(401).send({ error: 'Authentication required' });
+    }
+    try {
+      const result = await cosmeticsService.unequipCosmetic(targetStudentId, req.body.slot);
+      return result;
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  };
+  app.post('/api/me/cosmetics/unequip', handleUnequipCosmetic);
+  app.post('/me/cosmetics/unequip', handleUnequipCosmetic);
+  app.post('/api/cosmetics/unequip', handleUnequipCosmetic);
+  app.post('/cosmetics/unequip', handleUnequipCosmetic);
+
+  // 5. Demo tools (Game Master)
+  app.post('/api/admin/demo/grant-cosmetic', async (req: FastifyRequest<{ Body: { studentId?: string } }>) => {
+    const caller = extractUser(req);
+    const targetStudentId = req.body?.studentId || caller?.id || 'student_1';
+    return await cosmeticsService.grantRandomCosmetic(targetStudentId);
+  });
+
+  app.post('/api/admin/demo/grant-chest', async (req: FastifyRequest<{ Body: { studentId?: string; tier?: any } }>) => {
+    const caller = extractUser(req);
+    const targetStudentId = req.body?.studentId || caller?.id || 'student_1';
+    return await cosmeticsService.grantChest(targetStudentId, req.body?.tier || 'GOLDEN');
+  });
+
+  app.post('/api/admin/demo/reset-starter-loadout', async (req: FastifyRequest<{ Body: { studentId?: string } }>) => {
+    const caller = extractUser(req);
+    const targetStudentId = req.body?.studentId || caller?.id || 'student_1';
+    return await cosmeticsService.resetToStarterLoadout(targetStudentId);
   });
 
   app.post('/api/cosmetics/craft', async (req: FastifyRequest<{

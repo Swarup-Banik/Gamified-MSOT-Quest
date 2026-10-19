@@ -29,6 +29,12 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { CompanionAvatar } from '../assets/CompanionAvatar';
+import { AvatarComposer } from '../assets/AvatarComposer';
+import { FrameGenerator } from '../assets/FrameGenerator';
+import { BannerGenerator } from '../assets/BannerGenerator';
+import { FlameGenerator } from '../assets/FlameGenerator';
+import { TitleBadge } from '../assets/TitleBadge';
+import { AssetAdapter } from '../assets/AssetAdapter';
 import { RarityBadge } from '../ui/RarityBadge';
 import { soundManager } from '../../lib/sound-manager';
 import { api, setAccessToken } from '../../lib/api';
@@ -217,54 +223,87 @@ export function ProfileAndSettings({
         </div>
       )}
 
-      {/* Player Header Card */}
-      <div className="panel-quest-board p-6 flex flex-col sm:flex-row items-center justify-between gap-6">
-        <div className="flex items-center gap-4">
-          <div className="relative">
-            <div className="w-20 h-20 rounded-full p-1 bg-gradient-to-tr from-[#FFD23F] via-[#FF8A2B] to-[#FF3D9A] shadow-lg">
-              <div className="w-full h-full rounded-full bg-[#24104F] flex items-center justify-center overflow-hidden">
-                <CompanionAvatar species={user?.avatarId?.replace('avatar_', '') || 'fox'} mood="happy" size={70} />
+      {/* Player Header Card with Sunset Realm Banner */}
+      {(() => {
+        const equippedBanner = user?.equippedLoadout?.banner || profile?.equippedLoadout?.banner || 'banner_sunset_campus';
+        const equippedAvatar = user?.equippedLoadout?.avatar || profile?.equippedLoadout?.avatar || 'avatar_fox_novice';
+        const equippedFrame = user?.equippedLoadout?.frame || profile?.equippedLoadout?.frame || 'frame_rustic_wood';
+        const equippedTitle = user?.equippedLoadout?.title || profile?.equippedLoadout?.title || 'title_junior_scholar';
+        const equippedCompanion = user?.equippedLoadout?.companion || profile?.equippedLoadout?.companion || 'comp_kitsune_ember';
+        const { species: compSpecies, stage: compStage } = AssetAdapter.mapCompanionSkin(equippedCompanion);
+
+        return (
+          <div className="panel-quest-board rounded-3xl overflow-hidden border-2 border-white/15 shadow-2xl">
+            {/* Wide Responsive Landscape Banner */}
+            <div className="relative w-full max-h-52 overflow-hidden">
+              <BannerGenerator bannerKey={equippedBanner} aspectRatio="21/9" />
+              <div className="absolute inset-0 bg-gradient-to-t from-[#24104F] via-transparent to-transparent opacity-80" />
+            </div>
+
+            {/* Overlapping Profile Info Bar */}
+            <div className="p-6 pt-0 flex flex-col sm:flex-row items-start sm:items-end justify-between gap-6 -mt-12 sm:-mt-14 relative z-10">
+              <div className="flex items-end gap-4">
+                {/* Framed Avatar */}
+                <div className="relative">
+                  <FrameGenerator frameKey={equippedFrame} size={96} className="filter drop-shadow-xl">
+                    <AvatarComposer avatarKey={equippedAvatar} size={76} />
+                  </FrameGenerator>
+                  <span className="absolute bottom-1 right-1 px-2.5 py-0.5 rounded-full bg-[#FFD23F] text-[#24104F] font-display text-xs font-black border-2 border-[#24104F] shadow-lg">
+                    Lvl {profile?.currentLevel || 3}
+                  </span>
+                </div>
+
+                {/* Study Companion Mascot */}
+                <div className="hidden sm:block pb-2" title="Equipped Study Companion">
+                  <CompanionAvatar
+                    species={compSpecies}
+                    evolutionStage={compStage}
+                    mood="cheering"
+                    size={64}
+                  />
+                </div>
+
+                {/* Identity & Equipped Title */}
+                <div className="pb-1">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <h2 className="font-display text-2xl text-white">
+                      {user?.isAnonymous ? user?.anonymousAlias || 'Swift Falcon 42' : user?.name || 'Aarav Sharma'}
+                    </h2>
+                    <TitleBadge titleKey={equippedTitle} size="sm" />
+                  </div>
+                  <p className="text-xs text-slate-300">
+                    {user?.email} • {user?.campusId || 'Campus 1'} • Role: <strong className="text-[#FFD23F]">{user?.role || 'STUDENT'}</strong>
+                  </p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-[11px] font-bold bg-[#FFD23F]/20 text-[#FFD23F] px-2.5 py-0.5 rounded-full border border-[#FFD23F]/40">
+                      {user?.isAnonymous ? 'Anonymous Mode Active' : 'Public Profile'}
+                    </span>
+                    <span className="text-[11px] font-bold bg-[#7CF36B]/20 text-[#7CF36B] px-2.5 py-0.5 rounded-full border border-[#7CF36B]/40">
+                      {user?.status === 'ACTIVE' ? 'Active Learner' : user?.status}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Stats Grid */}
+              <div className="grid grid-cols-3 gap-3 w-full sm:w-auto pb-1">
+                <div className="p-3 rounded-2xl bg-[#15062C]/80 border border-white/10 text-center shadow-inner">
+                  <span className="text-[10px] text-slate-400 font-bold block">Lifetime XP</span>
+                  <span className="font-display text-lg text-[#FFD23F]">{profile?.lifetimeXp || 1420}</span>
+                </div>
+                <div className="p-3 rounded-2xl bg-[#15062C]/80 border border-white/10 text-center shadow-inner">
+                  <span className="text-[10px] text-slate-400 font-bold block">Streak Days</span>
+                  <span className="font-display text-lg text-[#FF8A2B]">{profile?.currentStreak || 7}</span>
+                </div>
+                <div className="p-3 rounded-2xl bg-[#15062C]/80 border border-white/10 text-center shadow-inner">
+                  <span className="text-[10px] text-slate-400 font-bold block">Shards</span>
+                  <span className="font-display text-lg text-[#FF3D9A]">💎 {profile?.spendableShards || 250}</span>
+                </div>
               </div>
             </div>
-            <span className="absolute bottom-0 right-0 px-2 py-0.5 rounded-full bg-[#FFD23F] text-[#24104F] font-display text-xs font-bold border border-[#24104F] shadow">
-              Lvl {profile?.currentLevel || 3}
-            </span>
           </div>
-
-          <div>
-            <h2 className="font-display text-2xl text-white">
-              {user?.isAnonymous ? user?.anonymousAlias || 'Swift Falcon 42' : user?.name || 'Aarav Sharma'}
-            </h2>
-            <p className="text-xs text-slate-300">
-              {user?.email} • {user?.campusId || 'Campus 1'} • Role: <strong className="text-[#FFD23F]">{user?.role || 'STUDENT'}</strong>
-            </p>
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-[11px] font-bold bg-[#FFD23F]/20 text-[#FFD23F] px-2.5 py-0.5 rounded-full border border-[#FFD23F]/40">
-                {user?.isAnonymous ? 'Anonymous Mode Active' : 'Public Profile'}
-              </span>
-              <span className="text-[11px] font-bold bg-[#7CF36B]/20 text-[#7CF36B] px-2.5 py-0.5 rounded-full border border-[#7CF36B]/40">
-                {user?.status === 'ACTIVE' ? 'Active Learner' : user?.status}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Quick Stats Grid */}
-        <div className="grid grid-cols-3 gap-3 w-full sm:w-auto">
-          <div className="p-3 rounded-2xl bg-[#15062C]/70 border border-white/10 text-center">
-            <span className="text-[10px] text-slate-400 font-bold block">Lifetime XP</span>
-            <span className="font-display text-lg text-[#FFD23F]">{profile?.lifetimeXp || 1420}</span>
-          </div>
-          <div className="p-3 rounded-2xl bg-[#15062C]/70 border border-white/10 text-center">
-            <span className="text-[10px] text-slate-400 font-bold block">Streak Days</span>
-            <span className="font-display text-lg text-[#FF8A2B]">{profile?.currentStreak || 7}</span>
-          </div>
-          <div className="p-3 rounded-2xl bg-[#15062C]/70 border border-white/10 text-center">
-            <span className="text-[10px] text-slate-400 font-bold block">Shards</span>
-            <span className="font-display text-lg text-[#FF3D9A]">💎 {profile?.spendableShards || 250}</span>
-          </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* Trophy Case & Badges Shelf */}
       <div className="panel-reward-tray p-6 space-y-4">
