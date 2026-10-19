@@ -126,29 +126,31 @@ export function SyllabusWorldMap() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-5xl mx-auto pb-16">
       {/* Header Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-[#2D2466] border border-[#3D3280] p-4 rounded-2xl shadow-xl">
+      <div className="flex flex-wrap items-center justify-between gap-3 panel-quest-board p-5 rounded-3xl shadow-2xl">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#FFC83D]/20 border border-[#FFC83D]/40 flex items-center justify-center text-[#FFC83D]">
-            <Compass className="w-5 h-5" />
+          <div className="w-11 h-11 rounded-2xl bg-[#FFD23F] text-[#24104F] border-2 border-white flex items-center justify-center shadow-md">
+            <Compass className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="font-display text-lg text-white">Campus Realm Map</h2>
-            <p className="text-xs text-slate-300">
+            <h2 className="font-display text-xl text-white text-stroke-sm">
+              Syllabus World Map
+            </h2>
+            <p className="text-xs text-[#FFF8E7]">
               CS201 Data Structures • Semester 2026 Trail
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 text-xs bg-[#1B1740] px-3 py-1.5 rounded-xl border border-[#3D3280]">
+        <div className="flex items-center gap-3 text-xs bg-[#15062C]/80 px-3.5 py-2 rounded-2xl border border-white/20">
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#3DDC97]" />
+            <span className="w-2.5 h-2.5 rounded-full bg-[#7CF36B]" />
             <span className="text-slate-300">Cleared (3)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#FFC83D] animate-ping" />
-            <span className="text-[#FFC83D] font-bold">Active: Week 4</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-[#FFD23F] animate-ping" />
+            <span className="text-[#FFD23F] font-bold">Active: Week 4</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-slate-500" />
@@ -158,13 +160,13 @@ export function SyllabusWorldMap() {
       </div>
 
       {/* Illustrated Canvas / World Map Container */}
-      <div className="relative w-full rounded-3xl bg-[#171338] border-2 border-[#2D2466] overflow-hidden shadow-2xl min-h-[560px]">
-        {/* Atmospheric Background SVGs: Twilight Stars, Distant Lantern Towers */}
-        <div className="absolute inset-0 pointer-events-none opacity-40">
-          <div className="absolute top-10 left-12 w-2 h-2 rounded-full bg-white animate-pulse" />
-          <div className="absolute top-36 left-1/3 w-1.5 h-1.5 rounded-full bg-[#4CC9F0] animate-pulse" />
-          <div className="absolute top-64 right-1/4 w-2 h-2 rounded-full bg-[#FFC83D] animate-ping" />
-          <div className="absolute bottom-28 left-20 w-1.5 h-1.5 rounded-full bg-white" />
+      <div className="relative w-full rounded-3xl bg-gradient-to-b from-[#1C0B40] via-[#321366] to-[#15062C] border-2 border-white/20 overflow-hidden shadow-2xl min-h-[580px]">
+        {/* Atmospheric Celestial Stars */}
+        <div className="absolute inset-0 pointer-events-none opacity-50">
+          <div className="absolute top-10 left-12 w-2 h-2 rounded-full bg-white animate-star-twinkle" />
+          <div className="absolute top-36 left-1/3 w-2 h-2 rounded-full bg-[#22E3FF] animate-star-twinkle" />
+          <div className="absolute top-64 right-1/4 w-2.5 h-2.5 rounded-full bg-[#FFD23F] animate-star-twinkle" />
+          <div className="absolute bottom-28 left-20 w-1.5 h-1.5 rounded-full bg-[#FF3D9A]" />
         </div>
 
         {/* SVG Path Connecting Nodes */}
@@ -173,16 +175,16 @@ export function SyllabusWorldMap() {
           <path
             d="M 20 12 Q 50 18 75 28 Q 50 38 28 46 Q 50 54 70 64 Q 50 74 35 82 Q 55 88 72 94"
             fill="none"
-            stroke="#0B091F"
-            strokeWidth="3.5"
+            stroke="#0F041F"
+            strokeWidth="4"
             strokeLinecap="round"
           />
           {/* Glowing Winding Study Path */}
           <path
             d="M 20 12 Q 50 18 75 28 Q 50 38 28 46 Q 50 54 70 64 Q 50 74 35 82 Q 55 88 72 94"
             fill="none"
-            stroke="#2D2466"
-            strokeWidth="2"
+            stroke="#5B2EE0"
+            strokeWidth="2.5"
             strokeDasharray="2,2"
             strokeLinecap="round"
           />
@@ -190,19 +192,19 @@ export function SyllabusWorldMap() {
           <path
             d="M 20 12 Q 50 18 75 28 Q 50 38 28 46 Q 50 54 70 64"
             fill="none"
-            stroke="#FFC83D"
-            strokeWidth="1.2"
-            strokeOpacity="0.8"
+            stroke="#FFD23F"
+            strokeWidth="2"
+            strokeOpacity="0.9"
             strokeLinecap="round"
           />
         </svg>
 
         {/* Fog of War on Bottom Locked Nodes (Weeks 5-6) */}
-        <div className="absolute bottom-0 left-0 right-0 h-44 bg-gradient-to-t from-[#1B1740] via-[#1B1740]/80 to-transparent pointer-events-none z-10 flex items-end justify-center pb-4">
-          <div className="text-center bg-[#1B1740]/90 backdrop-blur-md px-4 py-2 rounded-2xl border border-[#3D3280] shadow-lg">
-            <span className="text-xs text-[#4CC9F0] font-semibold flex items-center gap-1.5 justify-center">
-              <Lock className="w-3.5 h-3.5" />
-              Syllabus mist unlocks after Week 4 mastery
+        <div className="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-[#15062C] via-[#24104F]/90 to-transparent pointer-events-none z-10 flex items-end justify-center pb-5">
+          <div className="text-center bg-[#24104F]/90 backdrop-blur-md px-5 py-2.5 rounded-2xl border-2 border-[#22E3FF]/30 shadow-xl">
+            <span className="text-xs text-[#22E3FF] font-display flex items-center gap-2 justify-center">
+              <Lock className="w-4 h-4" />
+              <span>Syllabus mist lifts upon completing Week 4 mastery</span>
             </span>
           </div>
         </div>
@@ -227,47 +229,40 @@ export function SyllabusWorldMap() {
                 <div
                   className={`w-14 h-14 rounded-2xl flex items-center justify-center border-4 shadow-xl transition-all duration-300 ${
                     node.isBoss
-                      ? 'bg-gradient-to-tr from-[#9333EA] to-[#EC4899] border-[#FFC83D] animate-pulse shadow-[#FFC83D]/40'
+                      ? 'bg-gradient-to-tr from-[#FF3D9A] to-[#5B2EE0] border-[#FFD23F] animate-pulse shadow-glow-magenta'
                       : isCompleted
-                      ? 'bg-[#3DDC97]/20 border-[#3DDC97] text-[#3DDC97] shadow-[#3DDC97]/30'
+                      ? 'bg-[#7CF36B] border-white text-[#24104F] shadow-glow-lime'
                       : isUnlocked
-                      ? 'bg-[#FFC83D] border-white text-[#1B1740] ring-4 ring-[#FFC83D]/50 shadow-[#FFC83D]/50 animate-bounce'
-                      : 'bg-[#241D52] border-[#3D3280] text-slate-500 opacity-70'
+                      ? 'bg-[#FFD23F] border-white text-[#24104F] shadow-glow-yellow animate-bounce'
+                      : 'bg-[#1C0B40] border-white/20 text-slate-500 opacity-60'
                   }`}
-                  style={{
-                    boxShadow: isUnlocked
-                      ? '0 0 25px rgba(255, 200, 61, 0.7)'
-                      : isCompleted
-                      ? '0 0 15px rgba(61, 220, 151, 0.4)'
-                      : 'none',
-                  }}
                 >
                   {node.isBoss ? (
-                    <Award className="w-7 h-7 text-white" />
+                    <Award className="w-8 h-8 text-white drop-shadow" />
                   ) : isCompleted ? (
-                    <CheckCircle2 className="w-7 h-7 stroke-[2.5]" />
+                    <CheckCircle2 className="w-8 h-8 stroke-[3]" />
                   ) : isUnlocked ? (
-                    <Sparkles className="w-7 h-7 fill-current stroke-none" />
+                    <Sparkles className="w-8 h-8 fill-current stroke-none" />
                   ) : (
                     <Lock className="w-5 h-5" />
                   )}
                 </div>
 
-                {/* Companion Standing next to Active Unlocked Node */}
+                {/* Companion Walking next to Active Unlocked Node */}
                 {isUnlocked && (
-                  <div className="absolute -top-11 -right-8 pointer-events-none animate-[wiggle_2s_ease-in-out_infinite]">
-                    <CompanionAvatar species="FOX" mood="CHEERING" size={42} />
+                  <div className="absolute -top-12 -right-9 pointer-events-none animate-wiggle">
+                    <CompanionAvatar species="fox" mood="cheering" size={46} />
                   </div>
                 )}
 
                 {/* Node Pill Tag */}
                 <div
-                  className={`mt-2 px-2.5 py-1 rounded-xl text-[11px] font-bold whitespace-nowrap border shadow-md ${
+                  className={`mt-2 px-3 py-1 rounded-xl text-xs font-display whitespace-nowrap border-2 shadow-lg ${
                     isUnlocked
-                      ? 'bg-[#FFC83D] text-[#1B1740] border-white font-display'
+                      ? 'bg-[#FFD23F] text-[#24104F] border-white'
                       : isCompleted
-                      ? 'bg-[#1B1740]/90 text-[#3DDC97] border-[#3DDC97]/40'
-                      : 'bg-[#1B1740]/80 text-slate-400 border-[#3D3280]'
+                      ? 'bg-[#24104F] text-[#7CF36B] border-[#7CF36B]/60'
+                      : 'bg-[#15062C] text-slate-400 border-white/10'
                   }`}
                 >
                   Week {node.week}: {node.title.split(' ')[0]}
@@ -280,44 +275,44 @@ export function SyllabusWorldMap() {
 
       {/* Node Detail Inspection Modal / Drawer */}
       {selectedNode && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="card-battle max-w-lg w-full p-6 space-y-5 animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 bg-[#15062C]/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="panel-quest-board max-w-lg w-full p-6 space-y-5 animate-in zoom-in-95 duration-200">
             {/* Modal Header */}
             <div className="flex items-start justify-between">
               <div>
-                <span className="text-xs font-bold text-[#FFC83D] uppercase tracking-wider font-display">
+                <span className="text-xs font-bold text-[#FFD23F] uppercase tracking-wider font-display">
                   Week {selectedNode.week} • {selectedNode.course}
                 </span>
-                <h3 className="text-xl font-bold text-white mt-1">
+                <h3 className="text-xl font-display text-white mt-0.5">
                   {selectedNode.title}
                 </h3>
               </div>
               <button
                 onClick={() => setSelectedNode(null)}
-                className="p-1 rounded-lg bg-[#1B1740] text-slate-400 hover:text-white"
+                className="p-1.5 rounded-xl bg-white/10 text-slate-300 hover:text-white"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <p className="text-sm text-slate-300 leading-relaxed">
+            <p className="text-xs sm:text-sm text-[#FFF8E7] leading-relaxed">
               {selectedNode.description}
             </p>
 
             {/* Quests Breakdown */}
             <div className="space-y-2">
-              <h4 className="text-xs font-bold uppercase text-[#4CC9F0] tracking-wider">
-                Weekly Mastery Quests
+              <h4 className="text-xs font-display uppercase text-[#22E3FF] tracking-wider">
+                Weekly Mastery Challenges
               </h4>
               <div className="space-y-2">
                 {selectedNode.quests.map((q, idx) => (
                   <div
                     key={idx}
-                    className="flex items-center justify-between p-3 rounded-xl bg-[#1B1740] border border-[#3D3280]"
+                    className="flex items-center justify-between p-3 rounded-2xl bg-[#15062C]/80 border border-white/15"
                   >
                     <div className="flex items-center gap-2.5 text-xs text-white">
                       {q.done ? (
-                        <CheckCircle2 className="w-4 h-4 text-[#3DDC97]" />
+                        <CheckCircle2 className="w-4 h-4 text-[#7CF36B]" />
                       ) : (
                         <span className="w-4 h-4 rounded-full border border-slate-500" />
                       )}
@@ -325,7 +320,7 @@ export function SyllabusWorldMap() {
                         {q.title}
                       </span>
                     </div>
-                    <span className="text-xs font-bold text-[#FFC83D]">
+                    <span className="font-display text-xs text-[#FFD23F]">
                       +{q.xp} XP
                     </span>
                   </div>
@@ -336,23 +331,20 @@ export function SyllabusWorldMap() {
             {/* Action Button */}
             <div className="pt-2">
               {selectedNode.status === 'LOCKED' ? (
-                <div className="p-3 rounded-xl bg-slate-800/80 text-center text-xs text-slate-400 border border-slate-700">
+                <div className="p-3.5 rounded-2xl bg-white/5 text-center text-xs text-slate-400 border border-white/10">
                   Locked until previous weeks are cleared
                 </div>
               ) : (
-                <GameButton
-                  variant="primary"
-                  size="lg"
-                  fullWidth
+                <button
                   onClick={() => {
                     setSelectedNode(null);
-                    // Emit or handle run
                     soundManager.play('tap');
                   }}
-                  icon={<ChevronRight className="w-5 h-5" />}
+                  className="w-full py-3.5 rounded-2xl btn-sunset-3d btn-3d-yellow text-sm font-display flex items-center justify-center gap-2"
                 >
-                  {selectedNode.status === 'COMPLETED' ? 'Review cleared topic' : 'Start week 4 quest'}
-                </GameButton>
+                  <span>{selectedNode.status === 'COMPLETED' ? 'Review cleared topic' : 'Start week 4 quest'}</span>
+                  <ChevronRight className="w-5 h-5" />
+                </button>
               )}
             </div>
           </div>

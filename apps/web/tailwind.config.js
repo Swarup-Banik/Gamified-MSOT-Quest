@@ -9,32 +9,45 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Campus Realm Palette Tokens
+        // Sunset Realm Palette Tokens
+        sunset: {
+          violet: '#24104F',      // Base surfaces, panel fill
+          purple: '#5B2EE0',      // Panel highlights, glows, secondary buttons
+          magenta: '#FF3D9A',     // Hype accents, hits, league highlights
+          orange: '#FF8A2B',      // Warm glow, streak flame, horizon
+          yellow: '#FFD23F',      // XP, primary buttons, rewards
+          cyan: '#22E3FF',        // Magic, shields, freezes, info
+          lime: '#7CF36B',        // Correct, success, promotion
+          candyRed: '#FF4D5E',    // Monsters, gentle wrong-answer feedback
+          warmWhite: '#FFF8E7',   // Text on dark surfaces
+          // Bevel shadow tones for 3D buttons
+          yellowDark: '#D49B0E',
+          purpleDark: '#3B1A99',
+          orangeDark: '#C96008',
+          cyanDark: '#0FA2B8',
+          limeDark: '#4FA841',
+        },
+        // Backward-compatible realm aliases mapped to Sunset Realm
         realm: {
-          twilight: '#1B1740', // Deep app background
-          plum: '#2D2466',     // Panels, HUD surfaces, card backgrounds
-          gold: '#FFC83D',     // Lantern gold, XP, primary buttons
-          goldDark: '#D49F13', // 3D bevel shadow for primary buttons
-          mint: '#3DDC97',     // Success, streak safe, correct answers
-          mintDark: '#28A770', // Bevel shadow for mint
-          coral: '#FF5E6C',    // Monsters, gentle wrong-answer nudge
-          coralDark: '#D93B4A',// Bevel shadow for coral
-          sky: '#4CC9F0',      // Links, shields, freezes, info
-          skyDark: '#2BA6CC',  // Bevel shadow for sky
-          // Daybreak (Light) theme palette
-          daybreakBg: '#F8F6F0',
-          daybreakCard: '#FFFFFF',
-          daybreakBorder: '#E2D9F3',
-          daybreakText: '#2D2466',
+          twilight: '#24104F',
+          plum: '#341A6E',
+          gold: '#FFD23F',
+          goldDark: '#D49B0E',
+          mint: '#7CF36B',
+          mintDark: '#4FA841',
+          coral: '#FF4D5E',
+          coralDark: '#C72A39',
+          sky: '#22E3FF',
+          skyDark: '#0FA2B8',
         },
         // Rarity Tokens
         rarity: {
-          common: '#9AA3B2',
-          uncommon: '#3DDC97',
-          rare: '#4CC9F0',
-          epic: '#B26CFF',
-          legendaryStart: '#FFC83D',
-          legendaryEnd: '#FF8A3D',
+          common: '#A6A2C2',
+          uncommon: '#7CF36B',
+          rare: '#22E3FF',
+          epic: '#FF3D9A',
+          legendaryStart: '#FFD23F',
+          legendaryEnd: '#FF8A2B',
         },
       },
       fontFamily: {
@@ -43,17 +56,18 @@ module.exports = {
         dyslexic: ['"OpenDyslexic"', '"Nunito Sans"', 'sans-serif'],
       },
       boxShadow: {
-        'button-3d-gold': '0 4px 0 #D49F13',
-        'button-3d-gold-active': '0 1px 0 #D49F13',
-        'button-3d-plum': '0 4px 0 #181438',
-        'button-3d-coral': '0 4px 0 #D93B4A',
-        'button-3d-mint': '0 4px 0 #28A770',
-        'button-3d-sky': '0 4px 0 #2BA6CC',
-        'glow-gold': '0 0 24px rgba(255, 200, 61, 0.45)',
-        'glow-mint': '0 0 24px rgba(61, 220, 151, 0.45)',
-        'glow-coral': '0 0 24px rgba(255, 94, 108, 0.45)',
-        'glow-sky': '0 0 24px rgba(76, 201, 240, 0.45)',
-        'glow-epic': '0 0 24px rgba(178, 108, 255, 0.45)',
+        'btn-3d-yellow': '0 5px 0 #D49B0E, 0 8px 16px rgba(255, 210, 63, 0.4)',
+        'btn-3d-yellow-active': '0 2px 0 #D49B0E, 0 3px 6px rgba(255, 210, 63, 0.3)',
+        'btn-3d-purple': '0 5px 0 #3B1A99, 0 8px 16px rgba(91, 46, 224, 0.4)',
+        'btn-3d-purple-active': '0 2px 0 #3B1A99, 0 3px 6px rgba(91, 46, 224, 0.3)',
+        'btn-3d-orange': '0 5px 0 #C96008, 0 8px 16px rgba(255, 138, 43, 0.4)',
+        'btn-3d-cyan': '0 5px 0 #0FA2B8, 0 8px 16px rgba(34, 227, 255, 0.4)',
+        'glow-yellow': '0 0 25px rgba(255, 210, 63, 0.65)',
+        'glow-orange': '0 0 25px rgba(255, 138, 43, 0.65)',
+        'glow-magenta': '0 0 25px rgba(255, 61, 154, 0.65)',
+        'glow-cyan': '0 0 25px rgba(34, 227, 255, 0.65)',
+        'glow-lime': '0 0 25px rgba(124, 243, 107, 0.65)',
+        'glass-panel': '0 8px 32px 0 rgba(0, 0, 0, 0.37), inset 0 1px 1px 0 rgba(255, 255, 255, 0.15)',
       },
     },
   },

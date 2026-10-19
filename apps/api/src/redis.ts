@@ -23,11 +23,14 @@ export class RedisService {
   async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
     this.kv.set(key, value);
     if (ttlSeconds && ttlSeconds > 0) {
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (this.kv.get(key) === value) {
           this.kv.delete(key);
         }
       }, ttlSeconds * 1000);
+      if (typeof timer.unref === 'function') {
+        timer.unref();
+      }
     }
   }
 
@@ -132,7 +135,10 @@ export class RedisService {
   async checkRateLimit(key: string, limit: number, windowSeconds: number): Promise<{ allowed: boolean; remaining: number }> {
     const current = await this.incr(key);
     if (current === 1) {
-      setTimeout(() => this.del(key), windowSeconds * 1000);
+      const timer = setTimeout(() => this.del(key), windowSeconds * 1000);
+      if (typeof timer.unref === 'function') {
+        timer.unref();
+      }
     }
     return {
       allowed: current <= limit,
