@@ -13,6 +13,8 @@ import { db } from '../db.js';
 import { xpEngine } from '../services/xp-engine.js';
 import { cosmeticsService } from '../services/cosmetics-service.js';
 import { battlesService } from '../services/battles-service.js';
+import { argon2Service } from '../services/argon2-service.js';
+import { mfaService } from '../services/mfa-service.js';
 
 export async function runSeed(): Promise<{
   studentsCount: number;
@@ -225,13 +227,16 @@ export async function runSeed(): Promise<{
         id: sid,
         email,
         role: 'STUDENT',
+        status: 'ACTIVE',
         name,
+        fullName: name,
         avatarId: `avatar_${(studentIdCounter % 12) + 1}`,
         anonymousAlias: generateAnonymousAlias(sid),
         isAnonymous: studentIdCounter % 5 === 0, // 20% students in anonymous mode
         campusId: campus.id,
         batchId: assignedSection.batchId,
         sectionId: assignedSection.id,
+        rollNumber: `2025-CS-${studentIdCounter.toString().padStart(4, '0')}`,
         createdAt: new Date('2026-01-10').toISOString(),
       };
       db.users.set(sid, user);
@@ -293,7 +298,9 @@ export async function runSeed(): Promise<{
     id: 'faculty_sarah',
     email: 'sarah.jenkins@faculty.msot.edu.in',
     role: 'FACULTY',
+    status: 'ACTIVE',
     name: 'Prof. Sarah Jenkins',
+    fullName: 'Prof. Sarah Jenkins',
     avatarId: 'avatar_faculty_1',
     anonymousAlias: 'Mentor Owl 01',
     isAnonymous: false,
@@ -304,11 +311,31 @@ export async function runSeed(): Promise<{
   };
   db.users.set(facultySarah.id, facultySarah);
 
+  // Faculty alias account for quick demo login
+  const facultyDemo: User = {
+    id: 'faculty_demo',
+    email: 'faculty@msot.edu.in',
+    role: 'FACULTY',
+    status: 'ACTIVE',
+    name: 'Prof. Sarah Jenkins',
+    fullName: 'Prof. Sarah Jenkins',
+    avatarId: 'avatar_faculty_1',
+    anonymousAlias: 'Mentor Owl 01',
+    isAnonymous: false,
+    campusId: 'campus_1',
+    batchId: 'batch_campus_1_2025',
+    sectionId: 'sec_batch_campus_1_2025_A',
+    createdAt: new Date('2026-01-01').toISOString(),
+  };
+  db.users.set(facultyDemo.id, facultyDemo);
+
   const adminVance: User = {
     id: 'admin_vance',
     email: 'dean.vance@admin.msot.edu.in',
     role: 'ADMIN',
+    status: 'ACTIVE',
     name: 'Dean Arthur Vance',
+    fullName: 'Dean Arthur Vance',
     avatarId: 'avatar_admin_1',
     anonymousAlias: 'Grand Arbiter 00',
     isAnonymous: false,
@@ -318,6 +345,114 @@ export async function runSeed(): Promise<{
     createdAt: new Date('2026-01-01').toISOString(),
   };
   db.users.set(adminVance.id, adminVance);
+
+  // Admin alias account for quick demo login
+  const adminDemo: User = {
+    id: 'admin_demo',
+    email: 'admin@msot.edu.in',
+    role: 'ADMIN',
+    status: 'ACTIVE',
+    name: 'Dean Arthur Vance',
+    fullName: 'Dean Arthur Vance',
+    avatarId: 'avatar_admin_1',
+    anonymousAlias: 'Grand Arbiter 00',
+    isAnonymous: false,
+    campusId: 'campus_1',
+    batchId: 'batch_campus_1_2025',
+    sectionId: 'sec_batch_campus_1_2025_A',
+    createdAt: new Date('2026-01-01').toISOString(),
+  };
+  db.users.set(adminDemo.id, adminDemo);
+
+  // Dedicated demo student
+  const studentDemo: User = {
+    id: 'student_1',
+    email: 'student@msot.edu.in',
+    role: 'STUDENT',
+    status: 'ACTIVE',
+    name: 'Aarav Sharma',
+    fullName: 'Aarav Sharma',
+    avatarId: 'avatar_1',
+    anonymousAlias: 'Swift Falcon 42',
+    isAnonymous: false,
+    campusId: 'campus_1',
+    batchId: 'batch_campus_1_2025',
+    sectionId: 'sec_batch_campus_1_2025_A',
+    rollNumber: '2025-CS-0001',
+    createdAt: new Date('2026-01-01').toISOString(),
+  };
+  db.users.set(studentDemo.id, studentDemo);
+
+  // 9. Hash passwords using Argon2id for all demo accounts
+  const studentHash = await argon2Service.hash('StudentPass123!');
+  const facultyHash = await argon2Service.hash('FacultyPass123!');
+  const adminHash = await argon2Service.hash('AdminPass123!');
+
+  db.credentials.set(studentDemo.id, { userId: studentDemo.id, passwordHash: studentHash, lastChangedAt: new Date().toISOString() });
+  db.credentials.set(facultySarah.id, { userId: facultySarah.id, passwordHash: facultyHash, lastChangedAt: new Date().toISOString() });
+  db.credentials.set(facultyDemo.id, { userId: facultyDemo.id, passwordHash: facultyHash, lastChangedAt: new Date().toISOString() });
+  db.credentials.set(adminVance.id, { userId: adminVance.id, passwordHash: adminHash, lastChangedAt: new Date().toISOString() });
+  db.credentials.set(adminDemo.id, { userId: adminDemo.id, passwordHash: adminHash, lastChangedAt: new Date().toISOString() });
+
+  // 10. Seed Mandatory MFA for Admin Accounts
+  const adminMfaSecret = 'JBSWY3DPEHPK3PXP'; // Standard Base32 test secret
+  const { hashedCodes } = mfaService.generateBackupCodes();
+  db.mfaSecrets.set(adminVance.id, {
+    userId: adminVance.id,
+    secretBase32: adminMfaSecret,
+    isEnabled: true,
+    createdAt: new Date().toISOString(),
+    backupCodesHash: hashedCodes,
+  });
+  db.mfaSecrets.set(adminDemo.id, {
+    userId: adminDemo.id,
+    secretBase32: adminMfaSecret,
+    isEnabled: true,
+    createdAt: new Date().toISOString(),
+    backupCodesHash: hashedCodes,
+  });
+
+  // 11. Faculty Assignments (Assign Faculty Sarah to campus_1, batch 2025, sections A & B)
+  db.facultyAssignments.set('fa_1', {
+    id: 'fa_1',
+    facultyId: facultySarah.id,
+    campusId: 'campus_1',
+    courseId: 'course_ds',
+    sectionId: 'sec_batch_campus_1_2025_A',
+    assignedAt: new Date().toISOString(),
+  });
+  db.facultyAssignments.set('fa_2', {
+    id: 'fa_2',
+    facultyId: facultyDemo.id,
+    campusId: 'campus_1',
+    courseId: 'course_ds',
+    sectionId: 'sec_batch_campus_1_2025_A',
+    assignedAt: new Date().toISOString(),
+  });
+
+  // 12. Seed Institutional Roster Entries (for testing Roster Claim)
+  const rosterSamples = [
+    { email: 'vikram.roy@msot.edu.in', name: 'Vikram Roy', roll: '2025-CS-101', campus: 'campus_1', batch: 'batch_campus_1_2025', sec: 'sec_batch_campus_1_2025_A' },
+    { email: 'ananya.sen@msot.edu.in', name: 'Ananya Sen', roll: '2025-CS-102', campus: 'campus_1', batch: 'batch_campus_1_2025', sec: 'sec_batch_campus_1_2025_A' },
+    { email: 'dev.malhotra@msot.edu.in', name: 'Dev Malhotra', roll: '2025-CS-103', campus: 'campus_2', batch: 'batch_campus_2_2025', sec: 'sec_batch_campus_2_2025_A' },
+  ];
+
+  for (const s of rosterSamples) {
+    const rId = `roster_seed_${s.roll}`;
+    db.rosterEntries.set(rId, {
+      id: rId,
+      email: s.email,
+      fullName: s.name,
+      rollNumber: s.roll,
+      campusId: s.campus,
+      batchId: s.batch,
+      sectionId: s.sec,
+      claimToken: `claim_${s.roll.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+      isClaimed: false,
+      importedAt: new Date().toISOString(),
+      importBatchId: 'initial_roster_seed',
+    });
+  }
 
   console.log(`✅ Seed Complete: ${studentIdCounter - 1} students, ${campuses.length} campuses, ${questionCount} questions, ${topics.length} topics.`);
 

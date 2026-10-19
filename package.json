@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "npm run --workspaces --if-present build",
-    "test": "node --test tests/unit/*.test.js tests/integration/*.test.js tests/fairness/*.test.js tests/privacy/*.test.js",
+    "test": "node --test tests/unit/*.test.js tests/integration/*.test.js tests/fairness/*.test.js tests/privacy/*.test.js tests/security/*.test.js",
     "test:all": "npm run test && npm run test:report",
     "test:report": "node scripts/generate-test-report.js",
     "seed": "node apps/api/dist/scripts/seed.js",

@@ -1,17 +1,22 @@
 export type UserRole = 'STUDENT' | 'FACULTY' | 'ADMIN';
+export type UserStatus = 'INVITED' | 'PENDING_APPROVAL' | 'EMAIL_VERIFICATION_PENDING' | 'EMAIL_VERIFIED' | 'CONSENTED' | 'PROFILE_SETUP' | 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
 export interface User {
     id: string;
     email: string;
     passwordHash?: string;
     role: UserRole;
+    status: UserStatus;
     name: string;
+    fullName?: string;
     avatarId: string;
     anonymousAlias: string;
     isAnonymous: boolean;
     campusId: string;
     batchId: string;
     sectionId: string;
+    rollNumber?: string;
     createdAt: string;
+    lastLoginAt?: string;
 }
 export interface StudentProfile {
     studentId: string;
@@ -235,4 +240,140 @@ export interface AnomalyFlag {
     flaggedAt: string;
     reviewedBy?: string;
     reviewNotes?: string;
+}
+export interface Credential {
+    userId: string;
+    passwordHash: string;
+    lastChangedAt: string;
+}
+export interface OAuthAccount {
+    id: string;
+    userId: string;
+    provider: 'google' | 'microsoft' | 'msot_sso';
+    providerUserId: string;
+    email: string;
+    createdAt: string;
+}
+export interface RosterEntry {
+    id: string;
+    email: string;
+    fullName: string;
+    rollNumber: string;
+    campusId: string;
+    batchId: string;
+    sectionId: string;
+    claimToken?: string;
+    isClaimed: boolean;
+    claimedAt?: string;
+    claimedByUserId?: string;
+    importedAt: string;
+    importBatchId: string;
+}
+export interface Invitation {
+    id: string;
+    email: string;
+    role: UserRole;
+    assignedCampuses: string[];
+    assignedCourses: string[];
+    assignedSections: string[];
+    tokenHash: string;
+    expiresAt: string;
+    isAccepted: boolean;
+    invitedBy: string;
+    createdAt: string;
+}
+export interface EmailVerificationToken {
+    id: string;
+    userId: string;
+    tokenHash: string;
+    expiresAt: string;
+    isUsed: boolean;
+    createdAt: string;
+}
+export interface PasswordResetToken {
+    id: string;
+    userId: string;
+    tokenHash: string;
+    expiresAt: string;
+    isUsed: boolean;
+    createdAt: string;
+}
+export interface Session {
+    id: string;
+    userId: string;
+    refreshTokenHash: string;
+    userAgent: string;
+    ipAddress: string;
+    createdAt: string;
+    lastUsedAt: string;
+    expiresAt: string;
+    isRevoked: boolean;
+}
+export interface MfaSecret {
+    userId: string;
+    secretBase32: string;
+    isEnabled: boolean;
+    createdAt: string;
+    backupCodesHash: string[];
+}
+export interface ConsentRecord {
+    id: string;
+    userId: string;
+    consentVersion: string;
+    consentedAt: string;
+    ipAddress: string;
+    userAgent: string;
+    guardianConsentObtained?: boolean;
+}
+export interface ApprovalRequest {
+    id: string;
+    userId: string;
+    email: string;
+    fullName: string;
+    campusId: string;
+    rollNumber?: string;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+    submittedAt: string;
+    reviewedAt?: string;
+    reviewedBy?: string;
+    rejectionReason?: string;
+}
+export interface FacultyAssignment {
+    id: string;
+    facultyId: string;
+    campusId: string;
+    courseId: string;
+    sectionId: string;
+    assignedAt: string;
+}
+export interface AuthAuditEvent {
+    id: string;
+    timestamp: string;
+    userId?: string;
+    actorId?: string;
+    action: string;
+    status: 'SUCCESS' | 'FAILURE';
+    ipAddress: string;
+    userAgent: string;
+    metadata?: Record<string, any>;
+}
+export interface DataExportRequest {
+    id: string;
+    userId: string;
+    requestedAt: string;
+    status: 'COMPLETED' | 'PENDING';
+    dataJson?: string;
+}
+export interface DeletionRequest {
+    id: string;
+    userId: string;
+    requestedAt: string;
+    scheduledPurgeAt: string;
+    status: 'PENDING' | 'PURGED' | 'CANCELLED';
+}
+export interface UserScope {
+    role: UserRole;
+    assignedCampuses: string[];
+    assignedCourses: string[];
+    assignedSections: string[];
 }

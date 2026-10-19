@@ -48,12 +48,27 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: super-secure-msot-quest-jwt-secret-key-2026!
       DAILY_XP_SOFT_CAP: 150
-      LLM_PROVIDER: mock
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_FROM: noreply@msot.edu.in
+      ALLOWED_EMAIL_DOMAINS: msot.edu.in
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mailpit:
+        condition: service_started
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: msot_mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    environment:
+      MP_MAX_MESSAGES: 500
 
   web:
     build:

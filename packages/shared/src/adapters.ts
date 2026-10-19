@@ -441,3 +441,205 @@ export class MockCodingProfileAdapter implements CodingProfileAdapter {
     ];
   }
 }
+
+// ==========================================
+// 6. SSO Provider Interface (Google OIDC / SAML / MSOT)
+// ==========================================
+
+export interface SSOUserProfile {
+  provider: 'google' | 'microsoft' | 'msot_sso';
+  providerUserId: string;
+  email: string;
+  emailVerified: boolean;
+  hostedDomain?: string;
+  fullName: string;
+}
+
+export interface SSOProvider {
+  verifyIdToken(token: string): Promise<SSOUserProfile | null>;
+  getAuthorizationUrl(state: string, redirectUri: string): string;
+}
+
+export class MockGoogleSSOProvider implements SSOProvider {
+  constructor(private allowedDomains: string[] = ['msot.edu.in']) {}
+
+  async verifyIdToken(token: string): Promise<SSOUserProfile | null> {
+    if (!token || token.startsWith('invalid')) return null;
+
+    // Supports demo token: google-token-email@msot.edu.in
+    const email = token.includes('@') ? token.replace(/^google-token-/, '') : 'student@msot.edu.in';
+    const domain = email.split('@')[1] || '';
+
+    if (!this.allowedDomains.includes(domain)) {
+      return null;
+    }
+
+    return {
+      provider: 'google',
+      providerUserId: `g_${Buffer.from(email).toString('hex').slice(0, 16)}`,
+      email,
+      emailVerified: true,
+      hostedDomain: domain,
+      fullName: email.split('@')[0].replace('.', ' ').replace(/\b\w/g, c => c.toUpperCase()),
+    };
+  }
+
+  getAuthorizationUrl(state: string, redirectUri: string): string {
+    return `https://accounts.google.com/o/oauth2/v2/auth?client_id=mock-client-id&response_type=code&scope=openid%20email%20profile&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+  }
+}
+
+// ==========================================
+// 7. Mail Delivery Adapter (Mailpit & SMTP)
+// ==========================================
+
+export interface EmailMessage {
+  to: string;
+  subject: string;
+  htmlBody: string;
+  textBody?: string;
+  sentAt: string;
+}
+
+export interface MailAdapter {
+  sendEmail(to: string, subject: string, htmlBody: string, textBody?: string): Promise<boolean>;
+  getSentEmails(): EmailMessage[];
+}
+
+export class MockMailAdapter implements MailAdapter {
+  private sent: EmailMessage[] = [];
+
+  async sendEmail(to: string, subject: string, htmlBody: string, textBody?: string): Promise<boolean> {
+    this.sent.push({
+      to,
+      subject,
+      htmlBody,
+      textBody,
+      sentAt: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  getSentEmails(): EmailMessage[] {
+    return [...this.sent];
+  }
+
+  clear(): void {
+    this.sent = [];
+  }
+}
+
+// ==========================================
+// 8. Roster Import & Validation Utilities
+// ==========================================
+
+export interface RosterRowInput {
+  email: string;
+  fullName: string;
+  rollNumber: string;
+  campusId: string;
+  batchId: string;
+  sectionId: string;
+}
+
+export interface RosterDryRunPreview {
+  totalRows: number;
+  validRows: RosterRowInput[];
+  invalidRows: { row: number; data: any; reason: string }[];
+  duplicateRows: { row: number; email: string; rollNumber: string }[];
+  matchedExistingCount: number;
+  newStudentCount: number;
+}
+
+export function parseRosterCsv(csvContent: string, existingEmails: Set<string>): RosterDryRunPreview {
+  const lines = csvContent
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => l.length > 0);
+
+  if (lines.length === 0) {
+    return {
+      totalRows: 0,
+      validRows: [],
+      invalidRows: [],
+      duplicateRows: [],
+      matchedExistingCount: 0,
+      newStudentCount: 0,
+    };
+  }
+
+  // Header verification: email,fullName,rollNumber,campusId,batchId,sectionId
+  const header = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
+  const emailIdx = header.findIndex(h => h.includes('email'));
+  const nameIdx = header.findIndex(h => h.includes('name'));
+  const rollIdx = header.findIndex(h => h.includes('roll'));
+  const campusIdx = header.findIndex(h => h.includes('campus'));
+  const batchIdx = header.findIndex(h => h.includes('batch'));
+  const secIdx = header.findIndex(h => h.includes('section') || h.includes('sec'));
+
+  const validRows: RosterRowInput[] = [];
+  const invalidRows: { row: number; data: any; reason: string }[] = [];
+  const duplicateRows: { row: number; email: string; rollNumber: string }[] = [];
+  const seenEmails = new Set<string>();
+  const seenRolls = new Set<string>();
+
+  let matchedExistingCount = 0;
+  let newStudentCount = 0;
+
+  for (let i = 1; i < lines.length; i++) {
+    const rawTokens = lines[i].split(',').map(t => t.trim().replace(/^["']|["']$/g, ''));
+    if (rawTokens.length < 4) {
+      invalidRows.push({ row: i + 1, data: lines[i], reason: 'Insufficient columns' });
+      continue;
+    }
+
+    const email = rawTokens[emailIdx >= 0 ? emailIdx : 0]?.toLowerCase() || '';
+    const fullName = rawTokens[nameIdx >= 0 ? nameIdx : 1] || '';
+    const rollNumber = rawTokens[rollIdx >= 0 ? rollIdx : 2] || '';
+    const campusId = rawTokens[campusIdx >= 0 ? campusIdx : 3] || 'campus_1';
+    const batchId = rawTokens[batchIdx >= 0 ? batchIdx : 4] || 'batch_2025';
+    const sectionId = rawTokens[secIdx >= 0 ? secIdx : 5] || 'sec_a';
+
+    if (!email || !email.includes('@') || !fullName || !rollNumber) {
+      invalidRows.push({
+        row: i + 1,
+        data: lines[i],
+        reason: 'Missing email, name, or roll number',
+      });
+      continue;
+    }
+
+    if (seenEmails.has(email) || seenRolls.has(rollNumber)) {
+      duplicateRows.push({ row: i + 1, email, rollNumber });
+      continue;
+    }
+
+    seenEmails.add(email);
+    seenRolls.add(rollNumber);
+
+    if (existingEmails.has(email)) {
+      matchedExistingCount++;
+    } else {
+      newStudentCount++;
+    }
+
+    validRows.push({
+      email,
+      fullName,
+      rollNumber,
+      campusId,
+      batchId,
+      sectionId,
+    });
+  }
+
+  return {
+    totalRows: lines.length - 1,
+    validRows,
+    invalidRows,
+    duplicateRows,
+    matchedExistingCount,
+    newStudentCount,
+  };
+}
+

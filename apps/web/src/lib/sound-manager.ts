@@ -360,6 +360,7 @@ class SoundManager {
       | 'tap'
       | 'correct'
       | 'gentleWrong'
+      | 'wrong'
       | 'combo'
       | 'levelUp'
       | 'chestShake'
@@ -375,6 +376,7 @@ class SoundManager {
       case 'correct':
         return this.playCorrect();
       case 'gentleWrong':
+      case 'wrong':
         return this.playGentleWrong();
       case 'combo':
         return this.playCombo(arg);

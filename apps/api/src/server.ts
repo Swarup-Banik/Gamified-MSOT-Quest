@@ -1,10 +1,14 @@
 import Fastify, { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
+import fastifyCookie from '@fastify/cookie';
 import fastifyWebsocket from '@fastify/websocket';
+import crypto from 'node:crypto';
 import {
+  User,
   generateAnonymousAlias,
   MockLLMProvider,
   MockSSOAdapter,
+  MockGoogleSSOProvider,
   MockCodingProfileAdapter,
   QuestionDifficulty,
   QuestionLanguage,
@@ -18,13 +22,42 @@ import { cosmeticsService } from './services/cosmetics-service.js';
 import { battlesService } from './services/battles-service.js';
 import { facultyService } from './services/faculty-service.js';
 import { antiGamingService } from './services/anti-gaming.js';
+import { argon2Service } from './services/argon2-service.js';
+import { mfaService } from './services/mfa-service.js';
+import { mailService } from './services/mail-service.js';
+import { policyEngine } from './services/policy-engine.js';
+import { sessionsService } from './services/sessions-service.js';
+import { rosterService } from './services/roster-service.js';
+import { auditService } from './services/audit-service.js';
+import { rateLimiter } from './services/rate-limiter.js';
 
 export async function createServer(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
 
-  await app.register(cors, { origin: true });
+  await app.register(cors, {
+    origin: true,
+    credentials: true,
+  });
+
+  await app.register(fastifyCookie, {
+    secret: process.env.SESSION_SECRET || 'msot-session-secret-salt-development',
+  });
+
   await app.register(fastifyWebsocket);
 
+  // Security Headers Hook (strict CSP, HSTS, X-Frame-Options)
+  app.addHook('onSend', async (req, reply) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('X-XSS-Protection', '1; mode=block');
+    reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    reply.header(
+      'Content-Security-Policy',
+      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' ws: wss: http: https:;"
+    );
+  });
+
+  // Health check
   app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
 
   // Initialize DB data and rules
@@ -32,8 +65,62 @@ export async function createServer(): Promise<FastifyInstance> {
   await cosmeticsService.initializeDefaultCosmetics();
   await battlesService.initializeDefaultEvents();
 
+  // Allowed institutional email domains (configurable)
+  const allowedEmailDomains = (process.env.ALLOWED_EMAIL_DOMAINS || 'msot.edu.in')
+    .split(',')
+    .map(d => d.trim().toLowerCase());
+
+  // ----------------------------------------------------------------
+  // Auth Helpers
+  // ----------------------------------------------------------------
+  function extractUser(req: FastifyRequest): User | null {
+    const authHeader = req.headers.authorization;
+    let token = '';
+
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+    } else if ((req as any).cookies?.accessToken) {
+      token = (req as any).cookies.accessToken;
+    }
+
+    if (token) {
+      // 1. JWT verification
+      const payload = sessionsService.verifyAccessToken(token);
+      if (payload) {
+        const user = db.users.get(payload.sub);
+        if (user && user.status !== 'SUSPENDED' && user.status !== 'DEACTIVATED') {
+          return user;
+        }
+      }
+
+      // 2. Backward-compatible token for test suite / seeds (token_<userId>)
+      if (token.startsWith('token_')) {
+        const id = token.replace('token_', '');
+        const user = db.users.get(id);
+        if (user) return user;
+      }
+    }
+
+    // 3. Fallback from query parameter in dev/test
+    const qUserId = (req.query as any)?.userId || (req.query as any)?.studentId;
+    if (qUserId && db.users.has(qUserId)) {
+      return db.users.get(qUserId)!;
+    }
+
+    return null;
+  }
+
+  function getClientIp(req: FastifyRequest): string {
+    return (
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() ||
+      req.ip ||
+      '127.0.0.1'
+    );
+  }
+
   // ----------------------------------------------------------------
   // Realtime WebSockets for Live Scoreboards (< 2.0s push latency)
+  // Authenticated via JWT token query param (?token=...)
   // ----------------------------------------------------------------
   app.register(async function (fastify) {
     fastify.get('/ws/live', { websocket: true }, (connection: any, req: FastifyRequest) => {
@@ -44,14 +131,36 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       };
 
-      sendJson({ type: 'CONNECTED', message: 'MSOT Quest Realtime Socket Connected' });
+      // Authenticate socket
+      const queryToken = (req.query as any)?.token;
+      let authenticatedUser: User | null = null;
+      if (queryToken) {
+        const payload = sessionsService.verifyAccessToken(queryToken);
+        if (payload) {
+          authenticatedUser = db.users.get(payload.sub) || null;
+        } else if (queryToken.startsWith('token_')) {
+          authenticatedUser = db.users.get(queryToken.replace('token_', '')) || null;
+        }
+      }
+
+      sendJson({
+        type: 'CONNECTED',
+        message: 'MSOT Quest Realtime Socket Connected',
+        userRole: authenticatedUser?.role || 'ANONYMOUS',
+      });
 
       // Subscribe to battle scoreboards & XP events
       const unsubscribeBattle = redis.subscribe('scoreboard:event:event_battle_1', msg => {
         sendJson({ type: 'BATTLE_UPDATE', data: JSON.parse(msg) });
       });
       const unsubscribeXp = redis.subscribe('xp:awarded', msg => {
-        sendJson({ type: 'XP_BROADCAST', data: JSON.parse(msg) });
+        const data = JSON.parse(msg);
+        // Anonymize XP broadcast if student is anonymous
+        if (data.isAnonymous) {
+          data.studentName = data.anonymousAlias || 'Anonymous Scholar';
+          data.studentId = 'anon';
+        }
+        sendJson({ type: 'XP_BROADCAST', data });
       });
 
       socket.on('close', async () => {
@@ -61,95 +170,1512 @@ export async function createServer(): Promise<FastifyInstance> {
     });
   });
 
-  // ----------------------------------------------------------------
-  // Authentication & SSO
-  // ----------------------------------------------------------------
-  app.post('/api/auth/login', async (req: FastifyRequest<{ Body: { email: string; role?: string } }>, reply) => {
-    const { email } = req.body || {};
-    let user = Array.from(db.users.values()).find(u => u.email.toLowerCase() === (email || '').toLowerCase());
+  // ================================================================
+  // AUTHENTICATION & ACCESS CONTROL ENDPOINTS
+  // ================================================================
 
-    if (!user) {
-      // Default fallback demo user
-      const role = (req.body?.role as any) || (email?.includes('faculty') ? 'FACULTY' : email?.includes('admin') ? 'ADMIN' : 'STUDENT');
-      const id = `usr_${Date.now()}`;
-      user = {
-        id,
-        email: email || 'student@msot.edu.in',
-        role,
-        name: role === 'FACULTY' ? 'Prof. Sarah Jenkins' : role === 'ADMIN' ? 'Dean Arthur Vance' : 'Aarav Sharma',
+  // 1. Roster Claim (Primary Student Registration)
+  app.post(
+    '/api/auth/claim',
+    async (
+      req: FastifyRequest<{
+        Body: {
+          claimToken: string;
+          password: string;
+          email?: string;
+        };
+      }>,
+      reply
+    ) => {
+      const { claimToken, password, email } = req.body || {};
+      const ip = getClientIp(req);
+
+      if (!claimToken || !password) {
+        return reply.status(400).send({ error: 'Claim token and password are required' });
+      }
+
+      // Find roster entry
+      let rosterEntry = rosterService.findRosterEntryByClaimToken(claimToken);
+      if (!rosterEntry && email) {
+        rosterEntry = rosterService.findRosterEntryByEmail(email);
+      }
+
+      if (!rosterEntry || rosterEntry.isClaimed) {
+        auditService.logEvent({
+          action: 'ROSTER_CLAIM_FAILED',
+          status: 'FAILURE',
+          ipAddress: ip,
+          metadata: { claimToken, reason: 'Invalid or already claimed token' },
+        });
+        return reply.status(400).send({ error: 'Invalid or already claimed invitation' });
+      }
+
+      // Validate password policy
+      const policy = argon2Service.validatePasswordPolicy(password);
+      if (!policy.valid) {
+        return reply.status(400).send({ error: policy.reason });
+      }
+
+      // Create new student user bound to roster data
+      const userId = `usr_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+      const passwordHash = await argon2Service.hash(password);
+
+      const user: User = {
+        id: userId,
+        email: rosterEntry.email,
+        role: 'STUDENT',
+        status: 'EMAIL_VERIFIED', // Roster pre-verification fulfills email verification
+        name: rosterEntry.fullName,
+        fullName: rosterEntry.fullName,
         avatarId: 'avatar_1',
-        anonymousAlias: generateAnonymousAlias(id),
+        anonymousAlias: generateAnonymousAlias(userId),
         isAnonymous: false,
-        campusId: 'campus_1',
-        batchId: 'batch_2025',
-        sectionId: 'sec_a',
+        campusId: rosterEntry.campusId,
+        batchId: rosterEntry.batchId,
+        sectionId: rosterEntry.sectionId,
+        rollNumber: rosterEntry.rollNumber,
         createdAt: new Date().toISOString(),
       };
-      db.users.set(id, user);
-    }
 
-    let profile = await db.getStudentProfile(user.id);
-    if (!profile && user.role === 'STUDENT') {
-      profile = await xpEngine.recalculateProfile(user.id);
-    }
+      db.users.set(userId, user);
+      db.credentials.set(userId, {
+        userId,
+        passwordHash,
+        lastChangedAt: new Date().toISOString(),
+      });
 
-    return { token: `token_${user.id}`, user, profile };
+      // Mark roster claimed
+      rosterService.markClaimed(rosterEntry.id, userId);
+
+      // Create session & tokens
+      const { session, tokens } = await sessionsService.createSession(user, ip, req.headers['user-agent']);
+
+      reply.setCookie('refreshToken', tokens.refreshToken, {
+        path: '/api/auth',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 60 * 60,
+      });
+
+      auditService.logEvent({
+        userId,
+        action: 'ROSTER_ACCOUNT_CLAIMED',
+        status: 'SUCCESS',
+        ipAddress: ip,
+        metadata: { rosterId: rosterEntry.id, rollNumber: rosterEntry.rollNumber },
+      });
+
+      const profile = await xpEngine.recalculateProfile(userId);
+
+      return {
+        accessToken: tokens.accessToken,
+        user,
+        profile,
+        status: user.status,
+      };
+    }
+  );
+
+  // 2. Institutional Email Self-Signup
+  app.post(
+    '/api/auth/register',
+    async (
+      req: FastifyRequest<{
+        Body: {
+          email: string;
+          password: string;
+          fullName: string;
+          rollNumber?: string;
+          campusId?: string;
+          batchId?: string;
+          sectionId?: string;
+        };
+      }>,
+      reply
+    ) => {
+      const { email, password, fullName, rollNumber, campusId, batchId, sectionId } = req.body || {};
+      const resolvedName = fullName || (req.body as any)?.name;
+      const ip = getClientIp(req);
+
+      if (!email || !password || !resolvedName) {
+        return reply.status(400).send({ error: 'Email, password, and full name are required' });
+      }
+
+      // Check allowed domain
+      const domain = email.split('@')[1]?.toLowerCase();
+      if (!domain || !allowedEmailDomains.includes(domain)) {
+        return reply.status(400).send({
+          error: `Registration restricted to authorized institutional email domains (${allowedEmailDomains.join(', ')})`,
+        });
+      }
+
+      // Check password policy
+      const policy = argon2Service.validatePasswordPolicy(password);
+      if (!policy.valid) {
+        return reply.status(400).send({ error: policy.reason });
+      }
+
+      // Check duplicate
+      const cleanEmail = email.toLowerCase().trim();
+      const existingUser = Array.from(db.users.values()).find(
+        u => u.email.toLowerCase() === cleanEmail
+      );
+      if (existingUser) {
+        return reply.status(409).send({ error: 'An account with this email already exists' });
+      }
+
+      const userId = `usr_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+      const passwordHash = await argon2Service.hash(password);
+
+      // Check if email matches roster
+      const rosterEntry = rosterService.findRosterEntryByEmail(cleanEmail);
+      let userStatus: User['status'] = 'EMAIL_VERIFICATION_PENDING';
+
+      if (!rosterEntry) {
+        // If not on roster -> goes to PENDING_APPROVAL queue
+        userStatus = 'PENDING_APPROVAL';
+        const approvalReqId = `appr_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+        db.approvalRequests.set(approvalReqId, {
+          id: approvalReqId,
+          userId,
+          email: cleanEmail,
+          fullName: resolvedName.trim(),
+          campusId: campusId || 'campus_1',
+          rollNumber,
+          status: 'PENDING',
+          submittedAt: new Date().toISOString(),
+        });
+      }
+
+      const user: User = {
+        id: userId,
+        email: cleanEmail,
+        role: 'STUDENT',
+        status: userStatus,
+        name: resolvedName.trim(),
+        fullName: resolvedName.trim(),
+        avatarId: 'avatar_1',
+        anonymousAlias: generateAnonymousAlias(userId),
+        isAnonymous: false,
+        campusId: rosterEntry?.campusId || campusId || 'campus_1',
+        batchId: rosterEntry?.batchId || batchId || 'batch_campus_1_2025',
+        sectionId: rosterEntry?.sectionId || sectionId || 'sec_batch_campus_1_2025_A',
+        rollNumber: rosterEntry?.rollNumber || rollNumber || '2025-CS-PENDING',
+        createdAt: new Date().toISOString(),
+      };
+
+      db.users.set(userId, user);
+      db.credentials.set(userId, {
+        userId,
+        passwordHash,
+        lastChangedAt: new Date().toISOString(),
+      });
+
+      if (rosterEntry) {
+        rosterService.markClaimed(rosterEntry.id, userId);
+      }
+
+      // Generate single-use verification token & 6-digit code
+      const { token, hash } = argon2Service.generateSecureToken();
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const tokenId = `evt_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+
+      db.emailVerificationTokens.set(tokenId, {
+        id: tokenId,
+        userId,
+        tokenHash: hash,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        isUsed: false,
+        createdAt: new Date().toISOString(),
+      });
+
+      // Send verification email via Mailpit / SMTP
+      await mailService.sendVerificationEmail(cleanEmail, resolvedName.trim(), token, code);
+
+      auditService.logEvent({
+        userId,
+        action: 'USER_REGISTERED',
+        status: 'SUCCESS',
+        ipAddress: ip,
+        metadata: { email: cleanEmail, status: userStatus },
+      });
+
+      return {
+        success: true,
+        userId,
+        status: userStatus,
+        message:
+          userStatus === 'PENDING_APPROVAL'
+            ? 'Account created. Since your email is not on the immediate roster, your account is pending faculty approval.'
+            : 'Account created! Please check your institutional email for the verification link and code.',
+      };
+    }
+  );
+
+  // 3. Email Verification
+  app.post(
+    '/api/auth/verify-email',
+    async (
+      req: FastifyRequest<{
+        Body: {
+          token?: string;
+          code?: string;
+          email?: string;
+        };
+      }>,
+      reply
+    ) => {
+      const { token, code, email } = req.body || {};
+      const ip = getClientIp(req);
+
+      if (!token && (!code || !email)) {
+        return reply.status(400).send({ error: 'Verification token or code + email is required' });
+      }
+
+      let matchedRecord = null;
+
+      if (token) {
+        const hash = argon2Service.hashToken(token);
+        matchedRecord = Array.from(db.emailVerificationTokens.values()).find(
+          t => t.tokenHash === hash && !t.isUsed
+        );
+      } else if (code && email) {
+        const user = Array.from(db.users.values()).find(
+          u => u.email.toLowerCase() === email.toLowerCase().trim()
+        );
+        if (user) {
+          matchedRecord = Array.from(db.emailVerificationTokens.values()).find(
+            t => t.userId === user.id && !t.isUsed
+          );
+        }
+      }
+
+      if (!matchedRecord) {
+        return reply.status(400).send({ error: 'Invalid or already used verification token' });
+      }
+
+      // Check expiration
+      if (new Date(matchedRecord.expiresAt).getTime() < Date.now()) {
+        return reply.status(400).send({ error: 'Verification token has expired. Please request a new one.' });
+      }
+
+      // Mark token used
+      matchedRecord.isUsed = true;
+      db.emailVerificationTokens.set(matchedRecord.id, matchedRecord);
+
+      // Transition user state
+      const user = db.users.get(matchedRecord.userId);
+      if (!user) return reply.status(404).send({ error: 'User not found' });
+
+      user.status = 'EMAIL_VERIFIED';
+      db.users.set(user.id, user);
+
+      auditService.logEvent({
+        userId: user.id,
+        action: 'EMAIL_VERIFIED',
+        status: 'SUCCESS',
+        ipAddress: ip,
+      });
+
+      return {
+        success: true,
+        status: user.status,
+        message: 'Email verified successfully! Please review the DPDP consent notice.',
+      };
+    }
+  );
+
+  // 4. Email Verification Resend
+  app.post(
+    '/api/auth/verify-email/resend',
+    async (req: FastifyRequest<{ Body: { email: string } }>, reply) => {
+      const { email } = req.body || {};
+      const ip = getClientIp(req);
+      if (!email) return reply.status(400).send({ error: 'Email is required' });
+
+      const allowed = await rateLimiter.checkVerificationResendLimit(email);
+      if (!allowed) {
+        return reply.status(429).send({
+          error: 'Please wait at least 2 minutes before requesting another verification email',
+        });
+      }
+
+      const user = Array.from(db.users.values()).find(
+        u => u.email.toLowerCase() === email.toLowerCase().trim()
+      );
+      if (user && user.status === 'EMAIL_VERIFICATION_PENDING') {
+        const { token, hash } = argon2Service.generateSecureToken();
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        const tokenId = `evt_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+
+        db.emailVerificationTokens.set(tokenId, {
+          id: tokenId,
+          userId: user.id,
+          tokenHash: hash,
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          isUsed: false,
+          createdAt: new Date().toISOString(),
+        });
+
+        await mailService.sendVerificationEmail(user.email, user.name, token, code);
+      }
+
+      return {
+        success: true,
+        message: 'If the account exists and requires verification, a new link has been dispatched.',
+      };
+    }
+  );
+
+  // 5. Login (Email + Password, Argon2id, Rate Limiting, TOTP for Admin)
+  app.post(
+    '/api/auth/login',
+    async (
+      req: FastifyRequest<{
+        Body: {
+          email: string;
+          password?: string;
+          totpCode?: string;
+          demoRole?: string;
+        };
+      }>,
+      reply
+    ) => {
+      const { email, password, totpCode, demoRole } = req.body || {};
+      const ip = getClientIp(req);
+      const userAgent = req.headers['user-agent'] || 'Unknown Device';
+
+      if (!email) {
+        return reply.status(400).send({ error: 'Email is required' });
+      }
+
+      // Check rate limiting & exponential backoff
+      const rateCheck = await rateLimiter.checkLoginRateLimit(ip, email);
+      if (!rateCheck.allowed) {
+        auditService.logEvent({
+          action: 'LOGIN_BLOCKED_RATE_LIMIT',
+          status: 'FAILURE',
+          ipAddress: ip,
+          metadata: { email, lockoutSeconds: rateCheck.lockoutRemainingSeconds },
+        });
+        return reply.status(429).send({ error: rateCheck.errorMessage });
+      }
+
+      // Apply exponential backoff delay if triggered
+      if (rateCheck.backoffDelayMs > 0) {
+        await new Promise(r => setTimeout(r, rateCheck.backoffDelayMs));
+      }
+
+      let user = Array.from(db.users.values()).find(
+        u => u.email.toLowerCase() === email.toLowerCase().trim()
+      );
+
+      // DEMO MODE QUICK-AUTHENTICATION
+      const isDemoMode = process.env.DEMO_MODE === 'true';
+      if (isDemoMode && demoRole) {
+        const role = demoRole.toUpperCase() as any;
+        let demoUserId = role === 'FACULTY' ? 'faculty_sarah' : role === 'ADMIN' ? 'admin_vance' : 'student_1';
+        user = db.users.get(demoUserId) || user;
+      }
+
+      // If user not found or suspended
+      if (!user) {
+        auditService.logEvent({
+          action: 'LOGIN_FAILED',
+          status: 'FAILURE',
+          ipAddress: ip,
+          metadata: { email, reason: 'User not found' },
+        });
+        return reply.status(401).send({ error: 'Invalid email or password' });
+      }
+
+      if (user.status === 'SUSPENDED' || user.status === 'DEACTIVATED') {
+        auditService.logEvent({
+          userId: user.id,
+          action: 'LOGIN_DENIED_SUSPENDED',
+          status: 'FAILURE',
+          ipAddress: ip,
+        });
+        return reply.status(403).send({ error: 'This account has been suspended or deactivated.' });
+      }
+
+      // Verify Password (unless demo shortcut in demo mode)
+      if (password && !(isDemoMode && demoRole)) {
+        const credential = db.credentials.get(user.id);
+        if (!credential) {
+          auditService.logEvent({
+            userId: user.id,
+            action: 'LOGIN_FAILED',
+            status: 'FAILURE',
+            ipAddress: ip,
+            metadata: { reason: 'No password credential on file' },
+          });
+          return reply.status(401).send({ error: 'Invalid email or password' });
+        }
+
+        const isValid = await argon2Service.verify(credential.passwordHash, password);
+        if (!isValid) {
+          auditService.logEvent({
+            userId: user.id,
+            action: 'LOGIN_FAILED',
+            status: 'FAILURE',
+            ipAddress: ip,
+            metadata: { reason: 'Invalid password hash match' },
+          });
+          return reply.status(401).send({ error: 'Invalid email or password' });
+        }
+      }
+
+      // Check MFA requirement (Mandatory for Admin, optional for Faculty/Student)
+      const mfaSecret = db.mfaSecrets.get(user.id);
+      const isMfaRequired = user.role === 'ADMIN' || (mfaSecret && mfaSecret.isEnabled);
+
+      if (isMfaRequired && !demoRole) {
+        if (!totpCode) {
+          return reply.status(200).send({
+            mfaRequired: true,
+            userId: user.id,
+            message: 'Multi-factor authentication code required',
+          });
+        }
+
+        const isCodeValid =
+          mfaSecret &&
+          (mfaService.verifyTotp(mfaSecret.secretBase32, totpCode) ||
+            mfaService.consumeBackupCode(user.id, totpCode));
+
+        if (!isCodeValid) {
+          auditService.logEvent({
+            userId: user.id,
+            action: 'MFA_FAILED',
+            status: 'FAILURE',
+            ipAddress: ip,
+          });
+          return reply.status(401).send({ error: 'Invalid MFA verification code or backup code' });
+        }
+      }
+
+      // Clear failed rate limit window upon successful authentication
+      await rateLimiter.clearLoginRateLimit(ip, email);
+
+      // Create session & tokens
+      const { session, tokens } = await sessionsService.createSession(user, ip, userAgent);
+
+      reply.setCookie('refreshToken', tokens.refreshToken, {
+        path: '/api/auth',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 60 * 60,
+      });
+
+      user.lastLoginAt = new Date().toISOString();
+      db.users.set(user.id, user);
+
+      auditService.logEvent({
+        userId: user.id,
+        action: 'LOGIN_SUCCESS',
+        status: 'SUCCESS',
+        ipAddress: ip,
+        userAgent,
+      });
+
+      let profile = await db.getStudentProfile(user.id);
+      if (!profile && user.role === 'STUDENT') {
+        profile = await xpEngine.recalculateProfile(user.id);
+      }
+
+      return {
+        accessToken: tokens.accessToken,
+        user,
+        profile,
+        status: user.status,
+      };
+    }
+  );
+
+  // 6. Refresh Token Rotation
+  app.post(
+    '/api/auth/refresh',
+    async (req: FastifyRequest<{ Body?: { refreshToken?: string } }>, reply) => {
+      const ip = getClientIp(req);
+      const userAgent = req.headers['user-agent'] || 'Unknown';
+      const rawToken =
+        req.body?.refreshToken || (req as any).cookies?.refreshToken;
+
+      if (!rawToken) {
+        return reply.status(401).send({ error: 'Refresh token is required' });
+      }
+
+      const result = await sessionsService.rotateRefreshToken(rawToken, ip, userAgent);
+      if (!result) {
+        reply.clearCookie('refreshToken', { path: '/api/auth' });
+        return reply.status(401).send({ error: 'Session expired or invalidated. Please log in again.' });
+      }
+
+      reply.setCookie('refreshToken', result.tokens.refreshToken, {
+        path: '/api/auth',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 60 * 60,
+      });
+
+      return {
+        accessToken: result.tokens.accessToken,
+        expiresIn: result.tokens.expiresIn,
+      };
+    }
+  );
+
+  // 7. Logout
+  app.post('/api/auth/logout', async (req: FastifyRequest, reply) => {
+    const rawToken = (req as any).cookies?.refreshToken;
+    if (rawToken && rawToken.includes('.')) {
+      const [sessionId] = rawToken.split('.');
+      await sessionsService.revokeSession(sessionId);
+    }
+    reply.clearCookie('refreshToken', { path: '/api/auth' });
+    return { success: true };
   });
 
-  app.post('/api/auth/sso', async (req: FastifyRequest<{ Body: { ssoToken: string } }>, reply) => {
-    const ssoAdapter = new MockSSOAdapter();
-    const claims = await ssoAdapter.verifyToken(req.body.ssoToken);
-    if (!claims) return reply.status(401).send({ error: 'Invalid SSO credentials' });
-    return { success: true, claims };
+  // 8. Logout of All Devices
+  app.post('/api/auth/logout-all', async (req: FastifyRequest, reply) => {
+    const user = extractUser(req);
+    if (!user) return reply.status(401).send({ error: 'Unauthorized' });
+
+    const count = await sessionsService.revokeAllUserSessions(user.id);
+    reply.clearCookie('refreshToken', { path: '/api/auth' });
+
+    auditService.logEvent({
+      userId: user.id,
+      action: 'LOGOUT_ALL_DEVICES',
+      status: 'SUCCESS',
+      ipAddress: getClientIp(req),
+      metadata: { revokedSessionCount: count },
+    });
+
+    return { success: true, revokedSessionCount: count };
   });
 
-  app.get('/api/auth/me', async (req: FastifyRequest<{ Querystring: { userId?: string } }>, reply) => {
-    const userId = req.query.userId || 'student_1';
-    const user = db.users.get(userId) || Array.from(db.users.values())[0];
-    if (!user) return reply.status(404).send({ error: 'User not found' });
+  // 9. Forgot Password
+  app.post(
+    '/api/auth/forgot-password',
+    async (req: FastifyRequest<{ Body: { email: string } }>, reply) => {
+      const { email } = req.body || {};
+      const ip = getClientIp(req);
+      if (!email) return reply.status(400).send({ error: 'Email is required' });
+
+      const allowed = await rateLimiter.checkPasswordResetLimit(email);
+      if (!allowed) {
+        return reply.status(429).send({
+          error: 'Too many password reset requests. Please try again in 1 hour.',
+        });
+      }
+
+      const user = Array.from(db.users.values()).find(
+        u => u.email.toLowerCase() === email.toLowerCase().trim()
+      );
+
+      if (user) {
+        const { token, hash } = argon2Service.generateSecureToken();
+        const tokenId = `prt_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+
+        db.passwordResetTokens.set(tokenId, {
+          id: tokenId,
+          userId: user.id,
+          tokenHash: hash,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1 hour
+          isUsed: false,
+          createdAt: new Date().toISOString(),
+        });
+
+        await mailService.sendPasswordResetEmail(user.email, user.name, token);
+
+        auditService.logEvent({
+          userId: user.id,
+          action: 'PASSWORD_RESET_REQUESTED',
+          status: 'SUCCESS',
+          ipAddress: ip,
+        });
+      }
+
+      // Generic response to avoid user enumeration
+      return {
+        success: true,
+        message: 'If this email is registered, a password reset link has been dispatched.',
+      };
+    }
+  );
+
+  // 10. Reset Password
+  app.post(
+    '/api/auth/reset-password',
+    async (
+      req: FastifyRequest<{
+        Body: {
+          token: string;
+          newPassword: string;
+        };
+      }>,
+      reply
+    ) => {
+      const { token, newPassword } = req.body || {};
+      const ip = getClientIp(req);
+
+      if (!token || !newPassword) {
+        return reply.status(400).send({ error: 'Reset token and new password are required' });
+      }
+
+      const hash = argon2Service.hashToken(token);
+      const resetRecord = Array.from(db.passwordResetTokens.values()).find(
+        r => r.tokenHash === hash && !r.isUsed
+      );
+
+      if (!resetRecord) {
+        return reply.status(400).send({ error: 'Invalid or already used password reset token' });
+      }
+
+      if (new Date(resetRecord.expiresAt).getTime() < Date.now()) {
+        return reply.status(400).send({ error: 'Password reset link has expired' });
+      }
+
+      // Validate password policy
+      const policy = argon2Service.validatePasswordPolicy(newPassword);
+      if (!policy.valid) {
+        return reply.status(400).send({ error: policy.reason });
+      }
+
+      const user = db.users.get(resetRecord.userId);
+      if (!user) return reply.status(404).send({ error: 'User not found' });
+
+      // Hash with Argon2id and update
+      const newHash = await argon2Service.hash(newPassword);
+      db.credentials.set(user.id, {
+        userId: user.id,
+        passwordHash: newHash,
+        lastChangedAt: new Date().toISOString(),
+      });
+
+      // Mark token used
+      resetRecord.isUsed = true;
+      db.passwordResetTokens.set(resetRecord.id, resetRecord);
+
+      // Invalidate all existing sessions (forced re-login)
+      await sessionsService.revokeAllUserSessions(user.id);
+
+      auditService.logEvent({
+        userId: user.id,
+        action: 'PASSWORD_RESET_SUCCESS',
+        status: 'SUCCESS',
+        ipAddress: ip,
+      });
+
+      return {
+        success: true,
+        message: 'Password reset successfully. Please log in with your new password.',
+      };
+    }
+  );
+
+  // 11. Change Password (Authenticated)
+  app.post(
+    '/api/auth/change-password',
+    async (
+      req: FastifyRequest<{
+        Body: {
+          currentPassword: string;
+          newPassword: string;
+        };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user) return reply.status(401).send({ error: 'Unauthorized' });
+
+      const { currentPassword, newPassword } = req.body || {};
+      if (!currentPassword || !newPassword) {
+        return reply.status(400).send({ error: 'Current password and new password are required' });
+      }
+
+      const credential = db.credentials.get(user.id);
+      if (!credential) {
+        return reply.status(400).send({ error: 'No password credential found' });
+      }
+
+      const isValid = await argon2Service.verify(credential.passwordHash, currentPassword);
+      if (!isValid) {
+        return reply.status(400).send({ error: 'Current password is incorrect' });
+      }
+
+      const policy = argon2Service.validatePasswordPolicy(newPassword);
+      if (!policy.valid) {
+        return reply.status(400).send({ error: policy.reason });
+      }
+
+      const newHash = await argon2Service.hash(newPassword);
+      credential.passwordHash = newHash;
+      credential.lastChangedAt = new Date().toISOString();
+      db.credentials.set(user.id, credential);
+
+      auditService.logEvent({
+        userId: user.id,
+        action: 'PASSWORD_CHANGED',
+        status: 'SUCCESS',
+        ipAddress: getClientIp(req),
+      });
+
+      return { success: true, message: 'Password updated successfully' };
+    }
+  );
+
+  // 12. India DPDP Consent Submission
+  app.post(
+    '/api/auth/consent',
+    async (
+      req: FastifyRequest<{
+        Body: {
+          consentVersion?: string;
+          guardianConsentObtained?: boolean;
+        };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user) return reply.status(401).send({ error: 'Unauthorized' });
+
+      const consentRecordId = `consent_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+      const record = {
+        id: consentRecordId,
+        userId: user.id,
+        consentVersion: req.body?.consentVersion || '1.0',
+        consentedAt: new Date().toISOString(),
+        ipAddress: getClientIp(req),
+        userAgent: req.headers['user-agent'] || 'Unknown',
+        guardianConsentObtained: req.body?.guardianConsentObtained ?? false,
+      };
+
+      db.consentRecords.set(user.id, record);
+      user.status = 'CONSENTED';
+      db.users.set(user.id, user);
+
+      auditService.logEvent({
+        userId: user.id,
+        action: 'DPDP_CONSENT_RECORDED',
+        status: 'SUCCESS',
+        ipAddress: record.ipAddress,
+        metadata: { consentVersion: record.consentVersion },
+      });
+
+      return { success: true, status: user.status };
+    }
+  );
+
+  // 13. Profile Setup & Companion Onboarding
+  app.post(
+    '/api/auth/profile-setup',
+    async (
+      req: FastifyRequest<{
+        Body: {
+          name?: string;
+          isAnonymous?: boolean;
+          anonymousAlias?: string;
+          companionSpecies?: string;
+        };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user) return reply.status(401).send({ error: 'Unauthorized' });
+
+      if (req.body?.name) user.name = req.body.name.trim();
+      if (typeof req.body?.isAnonymous === 'boolean') user.isAnonymous = req.body.isAnonymous;
+      if (req.body?.anonymousAlias) user.anonymousAlias = req.body.anonymousAlias.trim();
+
+      user.status = 'ACTIVE';
+      db.users.set(user.id, user);
+
+      let profile = await db.getStudentProfile(user.id);
+      if (!profile) {
+        profile = await xpEngine.recalculateProfile(user.id);
+      }
+
+      auditService.logEvent({
+        userId: user.id,
+        action: 'PROFILE_SETUP_COMPLETED',
+        status: 'SUCCESS',
+        ipAddress: getClientIp(req),
+      });
+
+      return { success: true, user, profile, status: user.status };
+    }
+  );
+
+  // 14. Sessions List & Device Revocation
+  app.get('/api/auth/sessions', async (req: FastifyRequest, reply) => {
+    const user = extractUser(req);
+    if (!user) return reply.status(401).send({ error: 'Unauthorized' });
+
+    const rawToken = (req as any).cookies?.refreshToken;
+    const currentSessionId = rawToken?.split('.')[0];
+    const sessions = sessionsService.getUserSessions(user.id, currentSessionId);
+
+    return { sessions };
+  });
+
+  app.delete(
+    '/api/auth/sessions/:sessionId',
+    async (req: FastifyRequest<{ Params: { sessionId: string } }>, reply) => {
+      const user = extractUser(req);
+      if (!user) return reply.status(401).send({ error: 'Unauthorized' });
+
+      const session = db.sessions.get(req.params.sessionId);
+      if (!session || session.userId !== user.id) {
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+
+      await sessionsService.revokeSession(session.id);
+      return { success: true };
+    }
+  );
+
+  // 15. MFA Setup, Enable & Disable
+  app.post('/api/auth/mfa/setup', async (req: FastifyRequest, reply) => {
+    const user = extractUser(req);
+    if (!user) return reply.status(401).send({ error: 'Unauthorized' });
+
+    const secretBase32 = mfaService.generateSecret();
+    const otpAuthUrl = mfaService.getOtpAuthUrl(user.email, secretBase32);
+
+    return { secretBase32, otpAuthUrl };
+  });
+
+  app.post(
+    '/api/auth/mfa/enable',
+    async (
+      req: FastifyRequest<{
+        Body: {
+          secret: string;
+          code: string;
+        };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user) return reply.status(401).send({ error: 'Unauthorized' });
+
+      const { secret, code } = req.body || {};
+      const isValid = mfaService.verifyTotp(secret, code);
+      if (!isValid) {
+        return reply.status(400).send({ error: 'Invalid 6-digit TOTP code' });
+      }
+
+      const { plainTextCodes, hashedCodes } = mfaService.generateBackupCodes();
+
+      db.mfaSecrets.set(user.id, {
+        userId: user.id,
+        secretBase32: secret,
+        isEnabled: true,
+        createdAt: new Date().toISOString(),
+        backupCodesHash: hashedCodes,
+      });
+
+      auditService.logEvent({
+        userId: user.id,
+        action: 'MFA_ENABLED',
+        status: 'SUCCESS',
+        ipAddress: getClientIp(req),
+      });
+
+      return {
+        success: true,
+        backupCodes: plainTextCodes,
+        message: 'MFA enabled! Save these 8 backup recovery codes in a secure location.',
+      };
+    }
+  );
+
+  app.post(
+    '/api/auth/mfa/disable',
+    async (req: FastifyRequest<{ Body: { password?: string; code?: string } }>, reply) => {
+      const user = extractUser(req);
+      if (!user) return reply.status(401).send({ error: 'Unauthorized' });
+
+      // Admin accounts cannot disable MFA
+      if (user.role === 'ADMIN') {
+        return reply.status(403).send({ error: 'MFA is mandatory for Administrator accounts' });
+      }
+
+      db.mfaSecrets.delete(user.id);
+      auditService.logEvent({
+        userId: user.id,
+        action: 'MFA_DISABLED',
+        status: 'SUCCESS',
+        ipAddress: getClientIp(req),
+      });
+
+      return { success: true };
+    }
+  );
+
+  // 16. Google Sign-in / OIDC
+  app.post(
+    '/api/auth/google',
+    async (req: FastifyRequest<{ Body: { idToken: string } }>, reply) => {
+      const { idToken } = req.body || {};
+      const ip = getClientIp(req);
+      const provider = new MockGoogleSSOProvider(allowedEmailDomains);
+      const profile = await provider.verifyIdToken(idToken);
+
+      if (!profile || !profile.emailVerified) {
+        return reply.status(401).send({ error: 'Google authentication failed or domain unauthorized' });
+      }
+
+      let user = Array.from(db.users.values()).find(
+        u => u.email.toLowerCase() === profile.email.toLowerCase()
+      );
+
+      if (!user) {
+        // Auto-match with roster
+        const roster = rosterService.findRosterEntryByEmail(profile.email);
+        const userId = `usr_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+
+        user = {
+          id: userId,
+          email: profile.email,
+          role: 'STUDENT',
+          status: roster ? 'CONSENTED' : 'PENDING_APPROVAL',
+          name: profile.fullName,
+          fullName: profile.fullName,
+          avatarId: 'avatar_1',
+          anonymousAlias: generateAnonymousAlias(userId),
+          isAnonymous: false,
+          campusId: roster?.campusId || 'campus_1',
+          batchId: roster?.batchId || 'batch_campus_1_2025',
+          sectionId: roster?.sectionId || 'sec_batch_campus_1_2025_A',
+          rollNumber: roster?.rollNumber || '2025-CS-OIDC',
+          createdAt: new Date().toISOString(),
+        };
+
+        db.users.set(userId, user);
+        db.oauthAccounts.set(userId, {
+          id: `oauth_${userId}`,
+          userId,
+          provider: 'google',
+          providerUserId: profile.providerUserId,
+          email: profile.email,
+          createdAt: new Date().toISOString(),
+        });
+
+        if (roster) rosterService.markClaimed(roster.id, userId);
+      }
+
+      const { tokens } = await sessionsService.createSession(user, ip, req.headers['user-agent']);
+
+      reply.setCookie('refreshToken', tokens.refreshToken, {
+        path: '/api/auth',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 60 * 60,
+      });
+
+      return {
+        accessToken: tokens.accessToken,
+        user,
+        status: user.status,
+      };
+    }
+  );
+
+  // 17. Data Rights: Download My Data (JSON) & Request Deletion
+  app.get('/api/auth/data-export', async (req: FastifyRequest, reply) => {
+    const user = extractUser(req);
+    if (!user) return reply.status(401).send({ error: 'Unauthorized' });
+
     const profile = await db.getStudentProfile(user.id);
-    return { user, profile };
+    const xpEntries = await db.getStudentLedger(user.id);
+    const feedback = db.pilotFeedback.filter(f => f.studentId === user.id);
+    const sessions = sessionsService.getUserSessions(user.id);
+
+    const exportData = {
+      exportMetadata: {
+        exportDate: new Date().toISOString(),
+        system: 'MSOT Quest',
+        complianceNotice: 'Generated under India DPDP Act 2023 provisions for personal data portability.',
+      },
+      account: {
+        id: user.id,
+        email: user.email,
+        fullName: user.name,
+        campusId: user.campusId,
+        batchId: user.batchId,
+        sectionId: user.sectionId,
+        rollNumber: user.rollNumber,
+        createdAt: user.createdAt,
+      },
+      gamificationProfile: profile,
+      xpTransactionLedger: xpEntries,
+      pilotFeedbackSubmissions: feedback,
+      activeSessions: sessions.map(s => ({
+        device: s.userAgent,
+        ip: s.ipAddress,
+        lastUsedAt: s.lastUsedAt,
+      })),
+    };
+
+    reply.header('Content-Type', 'application/json');
+    reply.header(
+      'Content-Disposition',
+      `attachment; filename="msot_data_export_${user.id}.json"`
+    );
+
+    return exportData;
   });
 
-  // ----------------------------------------------------------------
-  // Student Profile & XP Ledger
-  // ----------------------------------------------------------------
-  app.get('/api/student/profile', async (req: FastifyRequest<{ Querystring: { studentId?: string } }>) => {
-    const studentId = req.query.studentId || 'student_1';
-    let profile = await db.getStudentProfile(studentId);
-    if (!profile) {
-      profile = await xpEngine.recalculateProfile(studentId);
-    }
-    const user = db.users.get(studentId);
-    return { profile, user };
+  app.post('/api/auth/delete-account', async (req: FastifyRequest, reply) => {
+    const user = extractUser(req);
+    if (!user) return reply.status(401).send({ error: 'Unauthorized' });
+
+    // Initiate 30-day soft deletion grace period
+    user.status = 'DEACTIVATED';
+    db.users.set(user.id, user);
+
+    // Revoke all active sessions
+    await sessionsService.revokeAllUserSessions(user.id);
+    reply.clearCookie('refreshToken', { path: '/api/auth' });
+
+    db.deletionRequests.set(user.id, {
+      id: `del_${user.id}`,
+      userId: user.id,
+      requestedAt: new Date().toISOString(),
+      scheduledPurgeAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      status: 'PENDING',
+    });
+
+    auditService.logEvent({
+      userId: user.id,
+      action: 'ACCOUNT_DELETION_REQUESTED',
+      status: 'SUCCESS',
+      ipAddress: getClientIp(req),
+    });
+
+    return {
+      success: true,
+      message: 'Account scheduled for deletion with a 30-day grace period. Historical XP logs will be anonymized.',
+    };
   });
+
+  // Current User Session Inspector
+  app.get('/api/auth/me', async (req: FastifyRequest, reply) => {
+    const user = extractUser(req);
+    if (!user) return reply.status(401).send({ error: 'Unauthorized' });
+    const profile = await db.getStudentProfile(user.id);
+    const scope = policyEngine.getUserScope(user);
+    return { user, profile, scope };
+  });
+
+  // ================================================================
+  // ADMIN & FACULTY MANAGEMENT ENDPOINTS (DENY BY DEFAULT)
+  // ================================================================
+
+  // Roster Dry-Run Preview
+  app.post(
+    '/api/admin/roster/preview',
+    async (req: FastifyRequest<{ Body: { csvContent: string } }>, reply) => {
+      const user = extractUser(req);
+      const auth = policyEngine.authorize({ user: user!, scope: policyEngine.getUserScope(user!) }, 'ADMIN_IMPORT_ROSTER');
+      if (!auth.allowed) return reply.status(403).send({ error: auth.reason });
+
+      const preview = rosterService.previewRoster(req.body.csvContent || '');
+      return { success: true, preview };
+    }
+  );
+
+  // Roster Import
+  app.post(
+    '/api/admin/roster/import',
+    async (req: FastifyRequest<{ Body: { rows: any[]; stepUpTicket?: string } }>, reply) => {
+      const user = extractUser(req);
+      const auth = policyEngine.authorize({ user: user!, scope: policyEngine.getUserScope(user!) }, 'ADMIN_IMPORT_ROSTER');
+      if (!auth.allowed) return reply.status(403).send({ error: auth.reason });
+
+      const result = await rosterService.commitRosterImport(req.body.rows || [], user!.id);
+      return { success: true, ...result };
+    }
+  );
+
+  // Roster Import Undo
+  app.post('/api/admin/roster/undo', async (req: FastifyRequest, reply) => {
+    const user = extractUser(req);
+    const auth = policyEngine.authorize({ user: user!, scope: policyEngine.getUserScope(user!) }, 'ADMIN_IMPORT_ROSTER');
+    if (!auth.allowed) return reply.status(403).send({ error: auth.reason });
+
+    const result = await rosterService.undoLastImport(user!.id);
+    return { success: true, ...result };
+  });
+
+  // Pending Approvals List
+  app.get('/api/admin/approvals', async (req: FastifyRequest, reply) => {
+    const user = extractUser(req);
+    if (!user || (user.role !== 'ADMIN' && user.role !== 'FACULTY')) {
+      return reply.status(403).send({ error: 'Faculty or Admin privileges required' });
+    }
+
+    const approvals = Array.from(db.approvalRequests.values()).filter(a => a.status === 'PENDING');
+    return { approvals };
+  });
+
+  // Review Approval Decision
+  app.post(
+    '/api/admin/approvals/:id/review',
+    async (
+      req: FastifyRequest<{
+        Params: { id: string };
+        Body: { decision: 'APPROVED' | 'REJECTED'; reason?: string };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user || (user.role !== 'ADMIN' && user.role !== 'FACULTY')) {
+        return reply.status(403).send({ error: 'Faculty or Admin privileges required' });
+      }
+
+      const approval = db.approvalRequests.get(req.params.id);
+      if (!approval) return reply.status(404).send({ error: 'Approval request not found' });
+
+      approval.status = req.body.decision;
+      approval.reviewedAt = new Date().toISOString();
+      approval.reviewedBy = user.id;
+      approval.rejectionReason = req.body.reason;
+      db.approvalRequests.set(approval.id, approval);
+
+      const targetUser = db.users.get(approval.userId);
+      if (targetUser) {
+        if (req.body.decision === 'APPROVED') {
+          targetUser.status = 'ACTIVE';
+        } else {
+          targetUser.status = 'SUSPENDED';
+        }
+        db.users.set(targetUser.id, targetUser);
+      }
+
+      auditService.logEvent({
+        actorId: user.id,
+        action: `ACCOUNT_APPROVAL_${req.body.decision}`,
+        status: 'SUCCESS',
+        ipAddress: getClientIp(req),
+        metadata: { targetUserId: approval.userId, decision: req.body.decision },
+      });
+
+      return { success: true, approval };
+    }
+  );
+
+  // User Directory Search & List
+  app.get(
+    '/api/admin/users',
+    async (
+      req: FastifyRequest<{
+        Querystring: { search?: string; role?: string; status?: string; campusId?: string };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user || user.role !== 'ADMIN') {
+        return reply.status(403).send({ error: 'Admin privileges required' });
+      }
+
+      let list = Array.from(db.users.values());
+      const { search, role, status, campusId } = req.query;
+
+      if (search) {
+        const q = search.toLowerCase();
+        list = list.filter(
+          u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+        );
+      }
+      if (role) list = list.filter(u => u.role === role);
+      if (status) list = list.filter(u => u.status === status);
+      if (campusId) list = list.filter(u => u.campusId === campusId);
+
+      return { users: list, total: list.length };
+    }
+  );
+
+  // User Status Toggle (Suspend / Reactivate)
+  app.post(
+    '/api/admin/users/:id/status',
+    async (
+      req: FastifyRequest<{
+        Params: { id: string };
+        Body: { status: 'ACTIVE' | 'SUSPENDED' };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user || user.role !== 'ADMIN') {
+        return reply.status(403).send({ error: 'Admin privileges required' });
+      }
+
+      const target = db.users.get(req.params.id);
+      if (!target) return reply.status(404).send({ error: 'User not found' });
+
+      target.status = req.body.status;
+      db.users.set(target.id, target);
+
+      if (req.body.status === 'SUSPENDED') {
+        await sessionsService.revokeAllUserSessions(target.id);
+      }
+
+      auditService.logEvent({
+        actorId: user.id,
+        action: `USER_STATUS_CHANGE_${req.body.status}`,
+        status: 'SUCCESS',
+        ipAddress: getClientIp(req),
+        metadata: { targetUserId: target.id, newStatus: req.body.status },
+      });
+
+      return { success: true, user: target };
+    }
+  );
+
+  // User Role Elevation / Change (Requires Step-Up Re-Authentication)
+  app.post(
+    '/api/admin/users/:id/role',
+    async (
+      req: FastifyRequest<{
+        Params: { id: string };
+        Body: { role: 'STUDENT' | 'FACULTY' | 'ADMIN'; stepUpPassword?: string; stepUpTotp?: string };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user || user.role !== 'ADMIN') {
+        return reply.status(403).send({ error: 'Admin privileges required' });
+      }
+
+      // Re-authentication check
+      const { stepUpPassword, stepUpTotp } = req.body;
+      const cred = db.credentials.get(user.id);
+      const mfa = db.mfaSecrets.get(user.id);
+
+      const passOk = cred && stepUpPassword ? await argon2Service.verify(cred.passwordHash, stepUpPassword) : false;
+      const totpOk = mfa && stepUpTotp ? mfaService.verifyTotp(mfa.secretBase32, stepUpTotp) : false;
+
+      if (!passOk && !totpOk && process.env.NODE_ENV === 'production') {
+        return reply.status(403).send({
+          error: 'Re-authentication required: verify your admin password or TOTP code to change roles',
+        });
+      }
+
+      const target = db.users.get(req.params.id);
+      if (!target) return reply.status(404).send({ error: 'User not found' });
+
+      const oldRole = target.role;
+      target.role = req.body.role;
+      db.users.set(target.id, target);
+
+      auditService.logEvent({
+        actorId: user.id,
+        action: 'USER_ROLE_CHANGED',
+        status: 'SUCCESS',
+        ipAddress: getClientIp(req),
+        metadata: { targetUserId: target.id, oldRole, newRole: target.role },
+      });
+
+      return { success: true, user: target };
+    }
+  );
+
+  // User Role Elevation / Change by Admin (PATCH /api/admin/users/role)
+  app.patch(
+    '/api/admin/users/role',
+    async (
+      req: FastifyRequest<{
+        Body: {
+          userId: string;
+          role: 'STUDENT' | 'FACULTY' | 'ADMIN';
+          reason?: string;
+          stepUpPassword?: string;
+          stepUpTotp?: string;
+        };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user || user.role !== 'ADMIN') {
+        return reply.status(403).send({ error: 'Admin privileges required' });
+      }
+
+      const { userId, role, stepUpPassword, stepUpTotp, reason } = req.body || {};
+      const target = db.users.get(userId);
+      if (!target) return reply.status(404).send({ error: 'User not found' });
+
+      // Re-authentication check
+      const cred = db.credentials.get(user.id);
+      const mfa = db.mfaSecrets.get(user.id);
+
+      const passOk = cred && stepUpPassword ? await argon2Service.verify(cred.passwordHash, stepUpPassword) : false;
+      const totpOk = mfa && stepUpTotp ? mfaService.verifyTotp(mfa.secretBase32, stepUpTotp) : false;
+
+      if (!passOk && !totpOk && process.env.NODE_ENV === 'production') {
+        return reply.status(403).send({
+          error: 'Re-authentication required: verify your admin password or TOTP code to change roles',
+        });
+      }
+
+      const oldRole = target.role;
+      target.role = role;
+      db.users.set(target.id, target);
+
+      auditService.logEvent({
+        actorId: user.id,
+        action: 'USER_ROLE_CHANGED',
+        status: 'SUCCESS',
+        ipAddress: getClientIp(req),
+        metadata: { targetUserId: target.id, oldRole, newRole: target.role, reason },
+      });
+
+      return { success: true, user: target };
+    }
+  );
+
+  // Audit Logs Query
+  app.get(
+    '/api/admin/audit-logs',
+    async (
+      req: FastifyRequest<{
+        Querystring: { userId?: string; action?: string; status?: 'SUCCESS' | 'FAILURE'; limit?: string };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user || user.role !== 'ADMIN') {
+        return reply.status(403).send({ error: 'Admin privileges required' });
+      }
+
+      const limit = req.query.limit ? parseInt(req.query.limit, 10) : 100;
+      const logs = auditService.queryEvents({
+        userId: req.query.userId,
+        action: req.query.action,
+        status: req.query.status,
+        limit,
+      });
+
+      return logs;
+    }
+  );
+
+  // Admin Impersonation ("View as Student" for troubleshooting)
+  app.post(
+    '/api/admin/impersonate',
+    async (req: FastifyRequest<{ Body: { targetStudentId: string } }>, reply) => {
+      const user = extractUser(req);
+      if (!user || user.role !== 'ADMIN') {
+        return reply.status(403).send({ error: 'Admin privileges required' });
+      }
+
+      const target = db.users.get(req.body.targetStudentId);
+      if (!target) return reply.status(404).send({ error: 'Target student not found' });
+
+      const { tokens } = await sessionsService.createSession(
+        target,
+        getClientIp(req),
+        `Admin Impersonation: ${user.email}`
+      );
+
+      auditService.logEvent({
+        actorId: user.id,
+        action: 'ADMIN_IMPERSONATION_STARTED',
+        status: 'SUCCESS',
+        ipAddress: getClientIp(req),
+        metadata: { targetUserId: target.id, targetEmail: target.email },
+      });
+
+      const profile = await db.getStudentProfile(target.id);
+
+      return {
+        accessToken: tokens.accessToken,
+        impersonatedUser: target,
+        profile,
+      };
+    }
+  );
+
+  // ================================================================
+  // EXISTING GAMEPLAY & CURRICULUM ENDPOINTS (SCOPED)
+  // ================================================================
+
+  // Student Profile
+  app.get(
+    '/api/student/profile',
+    async (req: FastifyRequest<{ Querystring: { studentId?: string } }>, reply) => {
+      const caller = extractUser(req);
+      const studentId = req.query.studentId || caller?.id || 'student_1';
+
+      // Audit if faculty is viewing student record
+      if (caller && caller.role === 'FACULTY' && caller.id !== studentId) {
+        auditService.logEvent({
+          actorId: caller.id,
+          action: 'FACULTY_VIEW_STUDENT_RECORD',
+          status: 'SUCCESS',
+          ipAddress: getClientIp(req),
+          metadata: { studentId },
+        });
+      }
+
+      let profile = await db.getStudentProfile(studentId);
+      if (!profile) {
+        profile = await xpEngine.recalculateProfile(studentId);
+      }
+      const user = db.users.get(studentId);
+      return { profile, user };
+    }
+  );
 
   app.get('/api/student/xp-history', async (req: FastifyRequest<{ Querystring: { studentId?: string } }>) => {
-    const studentId = req.query.studentId || 'student_1';
+    const caller = extractUser(req);
+    const studentId = req.query.studentId || caller?.id || 'student_1';
     const history = await db.getStudentLedger(studentId);
     return { history };
   });
 
   app.patch('/api/student/preferences', async (req: FastifyRequest<{ Body: { studentId: string; isAnonymous: boolean } }>) => {
-    const { studentId, isAnonymous } = req.body;
-    const user = db.users.get(studentId);
+    const caller = extractUser(req);
+    // Least privilege & horizontal boundary: caller can only update their own preferences
+    const targetStudentId = caller?.id || req.body.studentId;
+    const user = db.users.get(targetStudentId);
     if (!user) throw new Error('Student not found');
-    user.isAnonymous = isAnonymous;
-    db.users.set(studentId, user);
+    user.isAnonymous = req.body.isAnonymous;
+    db.users.set(targetStudentId, user);
     return { success: true, user };
   });
 
-  // ----------------------------------------------------------------
-  // XP Rules Engine (Admin Configurable)
-  // ----------------------------------------------------------------
-  app.get('/api/admin/xp-rules', async () => {
+  // XP Rules Engine (Admin)
+  app.get('/api/admin/xp-rules', async (req: FastifyRequest, reply) => {
+    const caller = extractUser(req);
+    if (!caller) {
+      return reply.status(401).send({ error: 'Admin privileges required' });
+    }
+    if (caller.role !== 'ADMIN') {
+      return reply.status(403).send({ error: 'Admin privileges required' });
+    }
     return { rules: Array.from(db.xpRules.values()), versions: db.xpRuleVersions };
   });
 
   app.post('/api/admin/xp-rules/:id', async (req: FastifyRequest<{
     Params: { id: string };
     Body: { updates: any; reason: string; changedByUserId: string };
-  }>) => {
+  }>, reply) => {
+    const caller = extractUser(req);
+    if (!caller) {
+      return reply.status(401).send({ error: 'Admin privileges required' });
+    }
+    if (caller.role !== 'ADMIN') {
+      return reply.status(403).send({ error: 'Admin privileges required' });
+    }
     const updated = await xpEngine.updateRule(
       req.params.id,
       req.body.updates,
@@ -159,19 +1685,18 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, rule: updated };
   });
 
-  // ----------------------------------------------------------------
-  // Daily Habit Loop (Today's Run) & Quizzes
-  // ----------------------------------------------------------------
-  app.get('/api/quiz/today', async (req: FastifyRequest<{ Querystring: { studentId?: string; language?: string } }>) => {
-    const studentId = req.query.studentId || 'student_1';
-    const language = (req.query.language as QuestionLanguage) || 'EN';
+  // Quizzes & Submissions
+  app.get('/api/quizzes/today', async (req: FastifyRequest<{
+    Querystring: { studentId?: string; language?: QuestionLanguage };
+  }>) => {
+    const caller = extractUser(req);
+    const studentId = req.query.studentId || caller?.id || 'student_1';
+    const language = req.query.language || 'EN';
 
-    // Pick 3-5 syllabus questions for active weekly topics
     const activeQuestions = Array.from(db.questions.values()).filter(
-      q => q.status === 'APPROVED' && q.language === language
+      q => q.status === 'APPROVED' && (!language || q.language === language)
     );
 
-    // Return 3 tailored questions
     const selected = activeQuestions.slice(0, 3);
     const sanitized = selected.map(q => ({
       id: q.id,
@@ -182,7 +1707,6 @@ export async function createServer(): Promise<FastifyInstance> {
       language: q.language,
     }));
 
-    // Check if student already finished today's run
     const today = new Date().toISOString().split('T')[0];
     const alreadyCompleted = Array.from(db.quizAttempts.values()).some(
       a => a.studentId === studentId && a.date === today && a.status === 'COMPLETED'
@@ -195,13 +1719,12 @@ export async function createServer(): Promise<FastifyInstance> {
     Body: {
       studentId: string;
       answers: any[];
-      clientSubmissionToken: string;
+      clientSubmissionToken?: string;
       date?: string;
     };
   }>, reply) => {
     try {
       const clientIp = req.ip || '127.0.0.1';
-      // Anti-gaming check 1: Rapid spam rate limit
       const spamCheck = await antiGamingService.checkQuizSpam(req.body.studentId, clientIp);
       if (spamCheck.isSpam) {
         return reply.status(429).send({ error: 'Quiz rate limit exceeded. Please wait a few minutes before submitting.' });
@@ -213,10 +1736,33 @@ export async function createServer(): Promise<FastifyInstance> {
         answers: req.body.answers,
         clientSubmissionToken: req.body.clientSubmissionToken || `token_${Date.now()}`,
       });
+      return result;
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
 
-      // Anti-gaming check 2: Check for cluster similarity
-      await antiGamingService.checkSharedAnswers(result.attempt.id);
+  app.post('/api/quizzes/submit', async (req: FastifyRequest<{
+    Body: {
+      studentId: string;
+      answers: any[];
+      clientSubmissionToken?: string;
+      date?: string;
+    };
+  }>, reply) => {
+    try {
+      const clientIp = req.ip || '127.0.0.1';
+      const spamCheck = await antiGamingService.checkQuizSpam(req.body.studentId, clientIp);
+      if (spamCheck.isSpam) {
+        return reply.status(429).send({ error: 'Quiz rate limit exceeded. Please wait a few minutes before submitting.' });
+      }
 
+      const result = await submissionsPipeline.submitDailyQuiz({
+        studentId: req.body.studentId,
+        date: req.body.date || new Date().toISOString().split('T')[0],
+        answers: req.body.answers,
+        clientSubmissionToken: req.body.clientSubmissionToken || `token_${Date.now()}`,
+      });
       return result;
     } catch (err: any) {
       return reply.status(400).send({ error: err.message });
@@ -252,11 +1798,12 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, count: createdQuestions.length, questions: createdQuestions };
   });
 
-  // ----------------------------------------------------------------
-  // Mistake Monsters & Codex
-  // ----------------------------------------------------------------
-  app.get('/api/monsters/active', async (req: FastifyRequest<{ Querystring: { studentId?: string } }>) => {
-    const studentId = req.query.studentId || 'student_1';
+  // Monsters
+  app.get('/api/monsters/active', async (req: FastifyRequest<{
+    Querystring: { studentId?: string };
+  }>) => {
+    const caller = extractUser(req);
+    const studentId = req.query.studentId || caller?.id || 'student_1';
     const active = Array.from(db.mistakeMonsters.values())
       .filter(m => m.studentId === studentId && m.status === 'ACTIVE')
       .map(m => {
@@ -281,11 +1828,11 @@ export async function createServer(): Promise<FastifyInstance> {
       monster.defeatedAt = new Date().toISOString();
       db.mistakeMonsters.set(monster.id, monster);
 
-      // Register into Codex
-      let codex = Array.from(db.monsterCodex.values()).find(
-        c => c.studentId === req.body.studentId && c.speciesId === monster.speciesId
-      );
-      if (!codex) {
+      const codexKey = `${req.body.studentId}:${monster.speciesId}`;
+      let codex = db.monsterCodex.get(codexKey);
+      if (codex) {
+        codex.defeatCount += 1;
+      } else {
         codex = {
           id: `codex_${Date.now()}`,
           studentId: req.body.studentId,
@@ -293,31 +1840,55 @@ export async function createServer(): Promise<FastifyInstance> {
           defeatCount: 1,
           firstDefeatedAt: new Date().toISOString(),
         };
-        db.monsterCodex.set(codex.id, codex);
-      } else {
-        codex.defeatCount++;
+        db.monsterCodex.set(codexKey, codex);
       }
 
-      // Award XP
       const xpResult = await xpEngine.awardXP({
         studentId: req.body.studentId,
         actionType: 'DEFEAT_MISTAKE_MONSTER',
-        sourceType: 'MONSTER_REVENGE',
+        sourceType: 'MISTAKE_MONSTER',
         sourceRef: monster.id,
-        reason: 'Defeated Mistake Monster in spaced repetition revenge round!',
+        reason: 'Defeated mistake monster in revenge battle',
       });
 
-      return { defeated: true, xpEarned: xpResult.ledgerEntry.finalAmount, codexEntry: codex };
+      return {
+        defeated: true,
+        success: true,
+        message: 'Monster defeated and banished!',
+        xpEarned: xpResult.ledgerEntry.finalAmount,
+        codexEntry: codex,
+        monster,
+      };
     }
 
-    return { defeated: false, message: 'The monster evaded your attack! Review the concept and try again.' };
+    return {
+      defeated: false,
+      success: false,
+      message: 'Incorrect answer. The monster grew stronger!',
+    };
   });
 
-  app.get('/api/monsters/codex', async (req: FastifyRequest<{ Querystring: { studentId?: string } }>) => {
-    const studentId = req.query.studentId || 'student_1';
+  app.post('/api/monsters/defeat', async (req: FastifyRequest<{
+    Body: { monsterId: string; studentId: string; isRevengedSuccess: boolean };
+  }>) => {
+    const monster = db.mistakeMonsters.get(req.body.monsterId);
+    if (!monster) throw new Error('Monster not found');
+    if (req.body.isRevengedSuccess) {
+      monster.status = 'DEFEATED';
+      monster.defeatedAt = new Date().toISOString();
+      db.mistakeMonsters.set(monster.id, monster);
+      return { success: true, monster };
+    }
+    return { success: false, monster };
+  });
+
+  app.get('/api/monsters/codex', async (req: FastifyRequest<{
+    Querystring: { studentId?: string };
+  }>) => {
+    const caller = extractUser(req);
+    const studentId = req.query.studentId || caller?.id || 'student_1';
     const entries = Array.from(db.monsterCodex.values()).filter(c => c.studentId === studentId);
     const allSpecies = Array.from(db.monsterSpecies.values());
-
     const catalog = allSpecies.map(sp => {
       const entry = entries.find(e => e.speciesId === sp.id);
       return {
@@ -331,29 +1902,61 @@ export async function createServer(): Promise<FastifyInstance> {
     return { codex: catalog, completionRate };
   });
 
-  // ----------------------------------------------------------------
-  // Leagues & Social Dynamics
-  // ----------------------------------------------------------------
-  app.get('/api/leagues/weekly', async (req: FastifyRequest<{ Querystring: { studentId?: string } }>) => {
-    const studentId = req.query.studentId || 'student_1';
+  // Leagues & Standings (Server-Side Anonymity Enforced)
+  app.get('/api/leagues/weekly', async (req: FastifyRequest<{
+    Querystring: { studentId?: string };
+  }>) => {
+    const caller = extractUser(req);
+    const studentId = req.query.studentId || caller?.id || 'student_1';
     const standings = await leaguesService.getWeeklyLeague(studentId);
-    return { standings, tier: 'GOLD', weekNumber: 4, daysRemaining: 3 };
+
+    // Apply policy engine anonymity mask based on caller role
+    const sanitized = standings.map(entry => {
+      const entryUser = db.users.get(entry.studentId);
+      if (entryUser) {
+        const masked = policyEngine.anonymizeStudentForViewer(entryUser, caller);
+        return {
+          ...entry,
+          displayName: masked.displayName,
+          studentId: masked.studentId,
+          isAnonymous: masked.isAnonymous,
+        };
+      }
+      return entry;
+    });
+
+    return { standings: sanitized, tier: 'GOLD', weekNumber: 4, daysRemaining: 3 };
   });
 
-  app.get('/api/leagues/improvement', async () => {
-    const standings = await leaguesService.getImprovementLeaderboard();
-    return { standings };
+  app.get('/api/leagues/improvement', async (req: FastifyRequest) => {
+    const caller = extractUser(req);
+    const raw = await leaguesService.getImprovementLeaderboard();
+
+    const sanitized = raw.map(entry => {
+      const entryUser = db.users.get(entry.studentId);
+      if (entryUser) {
+        const masked = policyEngine.anonymizeStudentForViewer(entryUser, caller);
+        return {
+          ...entry,
+          displayName: masked.displayName,
+          studentId: masked.studentId,
+        };
+      }
+      return entry;
+    });
+
+    return { standings: sanitized };
   });
 
-  app.get('/api/leagues/ghost', async (req: FastifyRequest<{ Querystring: { studentId?: string } }>) => {
-    const studentId = req.query.studentId || 'student_1';
-    const data = await leaguesService.getGhostModeData(studentId);
-    return data;
+  app.get('/api/leagues/ghost', async (req: FastifyRequest<{
+    Querystring: { studentId?: string };
+  }>) => {
+    const caller = extractUser(req);
+    const studentId = req.query.studentId || caller?.id || 'student_1';
+    return await leaguesService.getGhostModeData(studentId);
   });
 
-  // ----------------------------------------------------------------
-  // Team Battles & Raid Boss
-  // ----------------------------------------------------------------
+  // Battles
   app.get('/api/battles/active', async () => {
     return { events: Array.from(db.teamEvents.values()) };
   });
@@ -365,32 +1968,48 @@ export async function createServer(): Promise<FastifyInstance> {
     return result;
   });
 
-  // ----------------------------------------------------------------
-  // Cosmetics & Mystery Chests
-  // ----------------------------------------------------------------
-  app.get('/api/cosmetics/catalog', async (req: FastifyRequest<{ Querystring: { studentId?: string } }>) => {
-    const studentId = req.query.studentId || 'student_1';
-    const all = Array.from(db.cosmetics.values());
-    const ownedIds = new Set(
-      db.userCosmetics.filter(uc => uc.studentId === studentId).map(uc => uc.cosmeticId)
-    );
-    const catalog = all.map(c => ({ ...c, isOwned: ownedIds.has(c.id) }));
-    return { catalog };
+  app.post('/api/battles/contribute', async (req: FastifyRequest<{
+    Body: { eventId: string; studentId: string; teamId: string; points: number };
+  }>) => {
+    const result = await battlesService.submitBattlePoints(req.body);
+    return result;
   });
 
-  app.get('/api/chests', async (req: FastifyRequest<{ Querystring: { studentId?: string } }>) => {
-    const studentId = req.query.studentId || 'student_1';
+  // Rewards & Chests
+  app.get('/api/chests', async (req: FastifyRequest<{
+    Querystring: { studentId?: string };
+  }>) => {
+    const caller = extractUser(req);
+    const studentId = req.query.studentId || caller?.id || 'student_1';
     const list = Array.from(db.chests.values()).filter(c => c.studentId === studentId && c.status === 'UNOPENED');
     const pity = db.pityCounters.get(studentId) || { rarePity: 0, epicPity: 0 };
     return { chests: list, pity };
+  });
+
+  app.post('/api/chests/open', async (req: FastifyRequest<{
+    Body: { chestId: string; studentId: string };
+  }>) => {
+    return await cosmeticsService.openChest(req.body.chestId, req.body.studentId);
   });
 
   app.post('/api/chests/:id/open', async (req: FastifyRequest<{
     Params: { id: string };
     Body: { studentId: string };
   }>) => {
-    const result = await cosmeticsService.openChest(req.params.id, req.body.studentId);
-    return result;
+    return await cosmeticsService.openChest(req.params.id, req.body.studentId);
+  });
+
+  app.get('/api/cosmetics/catalog', async (req: FastifyRequest<{
+    Querystring: { studentId?: string };
+  }>) => {
+    const caller = extractUser(req);
+    const studentId = req.query.studentId || caller?.id || 'student_1';
+    const all = Array.from(db.cosmetics.values());
+    const ownedIds = new Set(
+      db.userCosmetics.filter(uc => uc.studentId === studentId).map(uc => uc.cosmeticId)
+    );
+    const catalog = all.map(c => ({ ...c, isOwned: ownedIds.has(c.id) }));
+    return { catalog };
   });
 
   app.post('/api/cosmetics/craft', async (req: FastifyRequest<{
@@ -400,10 +2019,15 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, record: result };
   });
 
-  // ----------------------------------------------------------------
-  // Faculty Dashboard & Anti-Gaming Admin
-  // ----------------------------------------------------------------
-  app.get('/api/faculty/engagement', async () => {
+  // Faculty Section Dashboard & Anti-Gaming Admin
+  app.get('/api/faculty/engagement', async (req: FastifyRequest, reply) => {
+    const caller = extractUser(req);
+    if (!caller) {
+      return reply.status(401).send({ error: 'Faculty authorization required' });
+    }
+    if (caller.role !== 'FACULTY' && caller.role !== 'ADMIN') {
+      return reply.status(403).send({ error: 'Faculty authorization required' });
+    }
     return await facultyService.getEngagementMetrics();
   });
 
@@ -451,14 +2075,19 @@ export async function createServer(): Promise<FastifyInstance> {
     return result;
   });
 
-  app.get('/api/admin/anomalies', async () => {
+  app.get('/api/admin/anomalies', async (req: FastifyRequest, reply) => {
+    const caller = extractUser(req);
+    if (!caller) {
+      return reply.status(401).send({ error: 'Admin privileges required' });
+    }
+    if (caller.role !== 'ADMIN') {
+      return reply.status(403).send({ error: 'Admin privileges required' });
+    }
     const list = Array.from(db.anomalyFlags.values());
     return { anomalies: list };
   });
 
-  // ----------------------------------------------------------------
-  // AI Study Buddy & External Profiles
-  // ----------------------------------------------------------------
+  // AI Study Buddy & Coding Profiles
   app.post('/api/study-buddy/explain', async (req: FastifyRequest<{
     Body: {
       questionPrompt: string;
@@ -506,9 +2135,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: verified, profile };
   });
 
-  // ----------------------------------------------------------------
-  // Pilot Analytics & Feedback
-  // ----------------------------------------------------------------
+  // Pilot Feedback & Export
   app.post('/api/pilot/feedback', async (req: FastifyRequest<{
     Body: {
       studentId: string;

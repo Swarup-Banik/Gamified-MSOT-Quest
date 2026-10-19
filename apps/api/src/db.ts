@@ -20,6 +20,21 @@ import {
   Cosmetic,
   Chest,
   AnomalyFlag,
+  Credential,
+  OAuthAccount,
+  RosterEntry,
+  Invitation,
+  EmailVerificationToken,
+  PasswordResetToken,
+  Session,
+  MfaSecret,
+  ConsentRecord,
+  ApprovalRequest,
+  FacultyAssignment,
+  AuthAuditEvent,
+  DataExportRequest,
+  DeletionRequest,
+  UserScope,
 } from '@msot/shared';
 
 export interface AuditLogEntry {
@@ -115,6 +130,23 @@ export class Database {
   rewards = new Map<string, RewardItem>();
   redemptions = new Map<string, RewardRedemption>();
   externalProfiles = new Map<string, ExternalCodingProfile>();
+
+  // Auth, Credentials, Sessions & Access Control Collections
+  credentials = new Map<string, Credential>();
+  oauthAccounts = new Map<string, OAuthAccount>();
+  rosterEntries = new Map<string, RosterEntry>();
+  rosterHistory: { batchId: string; importedAt: string; rowCount: number; rows: RosterEntry[] }[] = [];
+  invitations = new Map<string, Invitation>();
+  emailVerificationTokens = new Map<string, EmailVerificationToken>();
+  passwordResetTokens = new Map<string, PasswordResetToken>();
+  sessions = new Map<string, Session>();
+  mfaSecrets = new Map<string, MfaSecret>();
+  consentRecords = new Map<string, ConsentRecord>();
+  approvalRequests = new Map<string, ApprovalRequest>();
+  facultyAssignments = new Map<string, FacultyAssignment>();
+  authAuditEvents: AuthAuditEvent[] = [];
+  dataExportRequests = new Map<string, DataExportRequest>();
+  deletionRequests = new Map<string, DeletionRequest>();
 
   // Immutable Official Academic Grade Data (Simulated LMS Read-Only View)
   private readonly officialGradesStore: ReadonlyArray<{
@@ -244,6 +276,21 @@ export class Database {
     this.rewards.clear();
     this.redemptions.clear();
     this.externalProfiles.clear();
+    this.credentials.clear();
+    this.oauthAccounts.clear();
+    this.rosterEntries.clear();
+    this.rosterHistory = [];
+    this.invitations.clear();
+    this.emailVerificationTokens.clear();
+    this.passwordResetTokens.clear();
+    this.sessions.clear();
+    this.mfaSecrets.clear();
+    this.consentRecords.clear();
+    this.approvalRequests.clear();
+    this.facultyAssignments.clear();
+    this.authAuditEvents = [];
+    this.dataExportRequests.clear();
+    this.deletionRequests.clear();
   }
 }
 

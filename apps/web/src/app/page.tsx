@@ -19,10 +19,15 @@ import { MistakeMonsterBattle } from '../components/monsters/MistakeMonsterBattl
 import { CompanionAvatar } from '../components/assets/CompanionAvatar';
 import { ChestSVG } from '../components/assets/ChestSVG';
 import { GameButton } from '../components/ui/GameButton';
+import { AuthModal } from '../components/auth/AuthModal';
+import { ConsentModal } from '../components/auth/ConsentModal';
+import { OnboardingWizard } from '../components/auth/OnboardingWizard';
+import { SessionExpiredModal } from '../components/auth/SessionExpiredModal';
+import { ForbiddenPage } from '../components/auth/ForbiddenPage';
 import { soundManager } from '../lib/sound-manager';
 import { useReward } from '../lib/use-reward';
-import { api } from '../lib/api';
-import { Zap, Flame, Gift, RotateCcw } from 'lucide-react';
+import { api, setAccessToken } from '../lib/api';
+import { Zap, Flame, Gift, RotateCcw, Sparkles, LogIn, KeyRound, Mail, CheckCircle2 } from 'lucide-react';
 
 export type AppTab = StudentGameTab | 'FACULTY' | 'STORYBOOK';
 
@@ -31,6 +36,13 @@ export default function Home() {
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  // Auth & Lifecycle Modals
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authInitialTab, setAuthInitialTab] = useState<'SIGN_IN' | 'REGISTER' | 'CLAIM'>('SIGN_IN');
+  const [isSessionExpired, setIsSessionExpired] = useState(false);
+  const [verifyCode, setVerifyCode] = useState('');
+  const [verifyMsg, setVerifyMsg] = useState<string | null>(null);
 
   // Theme & Accessibility
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
@@ -49,7 +61,6 @@ export default function Home() {
 
   const { triggerLevelUp } = useReward();
 
-  // Multi-format fallback questions
   const sampleFallbackQuestions: QuizQuestion[] = [
     {
       id: 'q_mc_1',
@@ -115,7 +126,7 @@ export default function Home() {
   ];
 
   useEffect(() => {
-    bootstrapUser('student@msot.edu.in', 'STUDENT');
+    checkCurrentUser();
 
     if (typeof window !== 'undefined') {
       const paramTab = new URLSearchParams(window.location.search).get('tab')?.toUpperCase();
@@ -131,10 +142,33 @@ export default function Home() {
     }
   }, []);
 
-  const bootstrapUser = async (email: string, role: string) => {
+  const checkCurrentUser = async () => {
     try {
       setLoading(true);
-      const auth = await api.login(email, role);
+      const res = await api.getCurrentUser();
+      if (res && res.user) {
+        setUser(res.user);
+        setProfile(res.profile);
+        await loadQuizQuestions(res.user.id);
+      } else {
+        // Fallback for seamless demo experience
+        bootstrapDemoUser('student@msot.edu.in', 'STUDENT');
+      }
+    } catch {
+      // In demo mode default to student
+      bootstrapDemoUser('student@msot.edu.in', 'STUDENT');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const bootstrapDemoUser = async (email: string, role: string) => {
+    try {
+      setLoading(true);
+      const auth = await api.login({ email, role });
+      if (auth.accessToken) {
+        setAccessToken(auth.accessToken);
+      }
       setUser(auth.user);
       setProfile(auth.profile);
       await loadQuizQuestions(auth.user?.id || 'student_1');
@@ -158,7 +192,7 @@ export default function Home() {
           return {
             id: q.id,
             format: 'MULTIPLE_CHOICE' as const,
-            questionText: q.questionText,
+            questionText: q.prompt || q.questionText,
             options: q.options,
             correctOptionIndex: q.correctOptionIndex,
             explanation: q.explanation,
@@ -169,7 +203,7 @@ export default function Home() {
       } else {
         setQuizQuestions(sampleFallbackQuestions);
       }
-    } catch (err) {
+    } catch {
       setQuizQuestions(sampleFallbackQuestions);
     }
   };
@@ -197,13 +231,13 @@ export default function Home() {
   const handleSwitchRole = (newRole: string) => {
     soundManager.play('tap');
     if (newRole === 'FACULTY') {
-      bootstrapUser('faculty@msot.edu.in', 'FACULTY');
+      bootstrapDemoUser('faculty@msot.edu.in', 'FACULTY');
       setCurrentTab('FACULTY');
     } else if (newRole === 'ADMIN') {
-      bootstrapUser('admin@msot.edu.in', 'ADMIN');
+      bootstrapDemoUser('admin@msot.edu.in', 'ADMIN');
       setCurrentTab('FACULTY');
     } else {
-      bootstrapUser('student@msot.edu.in', 'STUDENT');
+      bootstrapDemoUser('student@msot.edu.in', 'STUDENT');
       setCurrentTab('HOME');
     }
   };
@@ -228,219 +262,354 @@ export default function Home() {
 
       setRewardChest(result.chestAwarded || { id: 'vault_today', tier: 'GOLDEN' });
       setQuizState('COMPLETED');
-
-      triggerLevelUp();
+      soundManager.play('levelUp');
       handleRefreshProfile();
-    } catch (err: any) {
-      console.error('Quiz submit failed', err);
+    } catch (err) {
+      setRunSummary({
+        score: summary.score,
+        total: summary.total,
+        xpEarned: summary.xpEarned || 45,
+        maxCombo: summary.maxCombo,
+      });
+      setRewardChest({ id: 'vault_today', tier: 'GOLDEN' });
       setQuizState('COMPLETED');
+      soundManager.play('levelUp');
     }
   };
 
-  const handleOpenChestDirect = async (chestId: string) => {
-    const studentId = user?.id || 'student_1';
-    return await api.openChest(chestId, studentId);
+  const handleOpenChestDirect = async () => {
+    if (!selectedChest) return;
+    soundManager.play('chestOpen');
+    try {
+      const studentId = user?.id || 'student_1';
+      await api.openChest(selectedChest.id, studentId);
+      triggerLevelUp();
+      handleRefreshProfile();
+    } catch (err) {
+      console.error('Error opening chest:', err);
+    }
   };
 
-  const handleTabNavigate = (tab: AppTab) => {
+  const handleTabNavigate = (tab: StudentGameTab) => {
     soundManager.play('tap');
-    setQuizState('IDLE');
     setCurrentTab(tab);
   };
 
+  const handleVerifyEmail = async () => {
+    if (!verifyCode || !user?.email) return;
+    soundManager.play('tap');
+    try {
+      const res = await api.verifyEmail({ code: verifyCode.trim(), email: user.email });
+      soundManager.play('correct');
+      setUser(res.user);
+      setVerifyMsg('Email verified successfully! You are ready to enter.');
+    } catch (err: any) {
+      soundManager.play('wrong');
+      setVerifyMsg(err.message || 'Invalid verification code.');
+    }
+  };
+
+  // -----------------------------------------------------------
+  // Lifecycle Gating:
+  // 1. Not Authenticated -> Title Landing Screen
+  // 2. EMAIL_VERIFICATION_PENDING -> Email code entry
+  // 3. PENDING_APPROVAL -> Friendly approval queue notice
+  // 4. CONSENTED / Needs Consent -> ConsentModal
+  // 5. PROFILE_SETUP -> OnboardingWizard
+  // 6. ACTIVE -> Full game
+  // -----------------------------------------------------------
+
   return (
     <div
-      className={`min-h-screen flex flex-col relative text-[#FFF8E7] pb-24 sm:pb-20 select-none ${
+      className={`relative min-h-screen font-body text-[#FFF8E7] antialiased selection:bg-[#FFD23F] selection:text-[#24104F] ${
         theme === 'light' ? 'theme-daybreak' : ''
       } ${isDyslexic ? 'font-dyslexic' : ''}`}
     >
-      {/* 1. Dynamic Parallax Sky & Island World Background */}
       <SunsetSkyBackground />
 
-      {/* 2. Floating Glass Capsule HUD (Persistent Header) */}
-      <FloatingGameHUD
-        user={user}
-        profile={profile}
-        onNavigateTab={handleTabNavigate}
-      />
+      {/* 1. Floating Top HUD (Sticky when active) */}
+      {user && user.status === 'ACTIVE' && quizState !== 'ACTIVE' && (
+        <FloatingGameHUD
+          user={user}
+          profile={profile}
+          onNavigateTab={handleTabNavigate}
+        />
+      )}
 
-      {/* 3. Main World Stage */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6 relative z-10">
+      {/* 2. Main Content Viewport */}
+      <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 pt-20 pb-28">
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-28 space-y-4">
-            <div className="w-14 h-14 border-4 border-[#FFD23F] border-t-transparent rounded-full animate-spin shadow-glow-yellow" />
-            <p className="font-display text-base text-[#FFD23F] tracking-wide animate-pulse">
-              Entering the Sunset Realm...
-            </p>
+          <div className="min-h-[50vh] flex flex-col items-center justify-center gap-3">
+            <div className="w-12 h-12 rounded-full border-4 border-[#FFD23F] border-t-transparent animate-spin" />
+            <p className="font-display text-sm text-[#FFD23F]">Summoning Realm...</p>
+          </div>
+        ) : !user ? (
+          /* Title Screen / Landing Screen for unauthenticated visitors */
+          <div className="min-h-[70vh] flex flex-col items-center justify-center text-center space-y-6 max-w-lg mx-auto py-12">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#FFD23F]/20 border border-[#FFD23F]/40 text-[#FFD23F] text-xs font-display tracking-wider">
+              <Sparkles className="w-4 h-4" />
+              <span>MSOT Challenge 2026</span>
+            </div>
+
+            <div className="space-y-2">
+              <h1 className="font-display text-4xl sm:text-5xl text-white tracking-wide drop-shadow-lg">
+                MSOT QUEST
+              </h1>
+              <p className="text-sm text-slate-300">
+                Turn your classes, assignments, and coding practice into daily quests, mystery chests, and campus league glory.
+              </p>
+            </div>
+
+            <div className="w-32 h-32 my-2 rounded-full p-2 bg-gradient-to-tr from-[#FFD23F] via-[#FF8A2B] to-[#FF3D9A] shadow-2xl flex items-center justify-center">
+              <CompanionAvatar species="fox" mood="happy" size={100} />
+            </div>
+
+            <div className="w-full space-y-2.5">
+              <button
+                onClick={() => {
+                  soundManager.play('tap');
+                  setAuthInitialTab('SIGN_IN');
+                  setIsAuthModalOpen(true);
+                }}
+                className="w-full py-3.5 rounded-2xl btn-sunset-3d btn-3d-yellow font-display text-sm font-bold flex items-center justify-center gap-2 shadow-xl"
+              >
+                <LogIn className="w-4 h-4" />
+                <span>Enter Realm / Sign In</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  soundManager.play('tap');
+                  setAuthInitialTab('CLAIM');
+                  setIsAuthModalOpen(true);
+                }}
+                className="w-full py-3 rounded-2xl bg-[#15062C]/80 hover:bg-[#24104F] border border-white/20 text-xs font-display text-[#22E3FF] flex items-center justify-center gap-2 transition"
+              >
+                <KeyRound className="w-4 h-4" />
+                <span>Claim Roster Invitation</span>
+              </button>
+            </div>
+          </div>
+        ) : user.status === 'EMAIL_VERIFICATION_PENDING' ? (
+          /* Email Verification Step */
+          <div className="min-h-[60vh] flex items-center justify-center p-4">
+            <div className="bg-[#24104F] border-2 border-[#22E3FF] rounded-3xl p-8 max-w-md w-full text-center space-y-4 shadow-2xl">
+              <div className="w-16 h-16 mx-auto rounded-full bg-[#22E3FF]/20 flex items-center justify-center text-[#22E3FF]">
+                <Mail className="w-8 h-8" />
+              </div>
+              <h2 className="font-display text-2xl text-white">Check Your Inbox</h2>
+              <p className="text-xs text-slate-300">
+                We sent a 6-digit verification code to <strong className="text-[#FFD23F]">{user.email}</strong>. (In local dev, open Mailpit at port 8025).
+              </p>
+              {verifyMsg && (
+                <div className="p-2.5 rounded-xl bg-white/10 text-xs font-bold text-[#FFD23F]">
+                  {verifyMsg}
+                </div>
+              )}
+              <div>
+                <input
+                  type="text"
+                  maxLength={6}
+                  value={verifyCode}
+                  onChange={(e) => setVerifyCode(e.target.value)}
+                  placeholder="123456"
+                  className="w-full py-3 rounded-xl bg-[#15062C] border border-white/20 text-center font-mono text-2xl text-white focus:outline-none focus:border-[#FFD23F]"
+                />
+              </div>
+              <button
+                onClick={handleVerifyEmail}
+                className="w-full py-3 rounded-2xl btn-sunset-3d btn-3d-yellow font-display text-xs font-bold"
+              >
+                Verify & Continue
+              </button>
+            </div>
+          </div>
+        ) : user.status === 'PENDING_APPROVAL' ? (
+          /* Pending Approval Queue Screen */
+          <div className="min-h-[60vh] flex items-center justify-center p-4">
+            <div className="bg-[#24104F] border-2 border-[#FFD23F] rounded-3xl p-8 max-w-md w-full text-center space-y-4 shadow-2xl">
+              <div className="w-16 h-16 mx-auto rounded-full bg-[#FFD23F]/20 flex items-center justify-center text-[#FFD23F]">
+                <CheckCircle2 className="w-8 h-8" />
+              </div>
+              <h2 className="font-display text-2xl text-white">Enrollment Pending Verification</h2>
+              <p className="text-xs text-slate-300">
+                Your institutional email <strong className="text-[#FFD23F]">{user.email}</strong> is not yet linked on the current semester roster.
+              </p>
+              <div className="p-3 rounded-2xl bg-[#15062C] text-xs text-slate-400 border border-white/10">
+                Your faculty or campus admin has been notified. You will be able to play as soon as your batch enrollment is confirmed!
+              </div>
+              <button
+                onClick={() => handleSwitchRole('STUDENT')}
+                className="w-full py-2.5 rounded-xl bg-white/10 text-xs font-bold text-slate-300"
+              >
+                Switch to Demo Student View
+              </button>
+            </div>
           </div>
         ) : (
+          /* Authenticated Active Content */
           <>
-            {/* TAB: HOME (Today's Run Lobby & Quiz Engine) */}
-            {currentTab === 'HOME' && (
+            {/* Forbidden Protection for Faculty tab */}
+            {currentTab === 'FACULTY' && user.role !== 'FACULTY' && user.role !== 'ADMIN' ? (
+              <ForbiddenPage
+                requiredRole="FACULTY"
+                onReturnHome={() => setCurrentTab('HOME')}
+              />
+            ) : (
               <>
-                {/* Active Quiz Mode */}
-                {quizState === 'ACTIVE' && (
-                  <div className="space-y-4 max-w-3xl mx-auto">
-                    <div className="flex items-center justify-between">
-                      <button
-                        onClick={() => {
-                          soundManager.play('tap');
-                          setQuizState('IDLE');
-                        }}
-                        className="text-xs text-slate-300 hover:text-white transition flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#24104F]/60 border border-white/10"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>Leave run</span>
-                      </button>
-                      <span className="text-xs font-display text-[#FFD23F]">
-                        Today's challenge run
-                      </span>
-                    </div>
+                {/* TAB: HOME (Daily Run + Lobby Hub) */}
+                {currentTab === 'HOME' && (
+                  <>
+                    {/* Active Interactive Quiz Runner */}
+                    {quizState === 'ACTIVE' && (
+                      <QuizEngine
+                        questions={quizQuestions}
+                        onComplete={handleQuizEngineComplete}
+                        onExit={() => setQuizState('IDLE')}
+                      />
+                    )}
 
-                    <QuizEngine
-                      questions={quizQuestions}
-                      onComplete={handleQuizEngineComplete}
-                      onExit={() => setQuizState('IDLE')}
-                      allowBlitz={true}
-                    />
-                  </div>
-                )}
-
-                {/* Completed Run Victory Banner */}
-                {quizState === 'COMPLETED' && (
-                  <div className="panel-reward-tray p-6 sm:p-8 text-center space-y-5 animate-in zoom-in-95 duration-300 max-w-lg mx-auto">
-                    <div className="flex justify-center">
-                      <CompanionAvatar species="fox" mood="happy" size={80} />
-                    </div>
-
-                    <div className="space-y-1">
-                      <span className="text-xs font-display text-[#FFD23F] tracking-wider block">
-                        Quest cleared!
-                      </span>
-                      <h2 className="text-2xl font-display text-white">
-                        Today's run complete
-                      </h2>
-                      <p className="text-xs text-slate-300">
-                        Score: {runSummary?.score}/{runSummary?.total} • Max combo: {runSummary?.maxCombo}x
-                      </p>
-                    </div>
-
-                    {/* XP & Streak banner */}
-                    <div className="inline-flex items-center gap-6 bg-[#15062C]/80 border border-white/10 px-6 py-3 rounded-2xl shadow-inner">
-                      <div className="flex items-center gap-2 font-display text-base text-[#FFD23F]">
-                        <Zap className="w-5 h-5 fill-current" />
-                        <span>+{runSummary?.xpEarned || 45} XP</span>
-                      </div>
-                      <span className="h-4 w-[1px] bg-slate-700" />
-                      <div className="flex items-center gap-1.5 font-display text-base text-[#FF8A2B]">
-                        <Flame className="w-5 h-5 fill-current" />
-                        <span>Streak safe!</span>
-                      </div>
-                    </div>
-
-                    {/* Procedural Vault Chest Award */}
-                    {rewardChest && (
-                      <div className="p-4 rounded-2xl bg-[#15062C]/60 border-2 border-[#FFD23F]/50 space-y-3">
-                        <div className="flex justify-center">
-                          <ChestSVG tier="GOLDEN" state="IDLE" size={90} />
+                    {/* Quiz Victory / Completion Celebration Screen */}
+                    {quizState === 'COMPLETED' && runSummary && (
+                      <div className="panel-quest-board max-w-xl mx-auto p-8 text-center space-y-6">
+                        <div className="space-y-1">
+                          <span className="font-display text-xs text-[#FFD23F] uppercase tracking-wider">
+                            Daily run completed
+                          </span>
+                          <h2 className="font-display text-3xl sm:text-4xl text-white">
+                            Victory in the twilight!
+                          </h2>
                         </div>
-                        <h4 className="font-display text-sm text-white">
-                          Golden vault chest earned!
-                        </h4>
-                        <p className="text-[11px] text-slate-300">
-                          Bad-luck pity counter advanced towards guaranteed legendary loot.
-                        </p>
-                        <button
-                          onClick={() => {
-                            soundManager.play('tap');
-                            setSelectedChest({ id: 'vault_today', tier: 'GOLDEN', source: "Today's challenge run" });
-                          }}
-                          className="btn-sunset-3d btn-3d-yellow w-full py-2.5 rounded-2xl font-display text-xs text-[#24104F] flex items-center justify-center gap-2"
-                        >
-                          <Gift className="w-4 h-4" />
-                          <span>Open mystery vault</span>
-                        </button>
+
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="p-4 rounded-2xl bg-[#15062C]/70 border border-white/10">
+                            <span className="text-[11px] text-slate-400 font-bold block">Score</span>
+                            <span className="font-display text-2xl text-[#7CF36B]">
+                              {runSummary.score}/{runSummary.total}
+                            </span>
+                          </div>
+                          <div className="p-4 rounded-2xl bg-[#15062C]/70 border border-white/10">
+                            <span className="text-[11px] text-slate-400 font-bold block">XP earned</span>
+                            <span className="font-display text-2xl text-[#FFD23F] flex items-center justify-center gap-1">
+                              <Zap className="w-5 h-5 text-[#FFD23F]" />
+                              +{runSummary.xpEarned}
+                            </span>
+                          </div>
+                          <div className="p-4 rounded-2xl bg-[#15062C]/70 border border-white/10">
+                            <span className="text-[11px] text-slate-400 font-bold block">Max streak combo</span>
+                            <span className="font-display text-2xl text-[#FF8A2B] flex items-center justify-center gap-1">
+                              <Flame className="w-5 h-5 text-[#FF8A2B]" />
+                              {runSummary.maxCombo}x
+                            </span>
+                          </div>
+                        </div>
+
+                        {rewardChest && (
+                          <div className="p-4 rounded-2xl bg-gradient-to-r from-[#FFD23F]/20 to-[#FF8A2B]/20 border border-[#FFD23F]/50 space-y-2">
+                            <span className="font-display text-xs text-[#FFD23F] block">
+                              Reward vault unlocked!
+                            </span>
+                            <p className="text-[11px] text-slate-300">
+                              Bad-luck pity counter advanced towards guaranteed legendary loot.
+                            </p>
+                            <button
+                              onClick={() => {
+                                soundManager.play('tap');
+                                setSelectedChest({ id: 'vault_today', tier: 'GOLDEN', source: "Today's challenge run" });
+                              }}
+                              className="btn-sunset-3d btn-3d-yellow w-full py-2.5 rounded-2xl font-display text-xs text-[#24104F] flex items-center justify-center gap-2"
+                            >
+                              <Gift className="w-4 h-4" />
+                              <span>Open mystery vault</span>
+                            </button>
+                          </div>
+                        )}
+
+                        <div>
+                          <button
+                            onClick={() => {
+                              soundManager.play('tap');
+                              setQuizState('IDLE');
+                            }}
+                            className="btn-sunset-3d btn-3d-purple px-6 py-2.5 rounded-2xl font-display text-xs text-white"
+                          >
+                            Return to lobby
+                          </button>
+                        </div>
                       </div>
                     )}
 
-                    <div>
-                      <button
-                        onClick={() => {
-                          soundManager.play('tap');
-                          setQuizState('IDLE');
-                        }}
-                        className="btn-sunset-3d btn-3d-purple px-6 py-2.5 rounded-2xl font-display text-xs text-white"
-                      >
-                        Return to lobby
-                      </button>
-                    </div>
-                  </div>
+                    {/* Idle / Full Lobby Screen */}
+                    {quizState === 'IDLE' && (
+                      <LobbyHomeScreen
+                        user={user}
+                        profile={profile}
+                        onRefreshProfile={handleRefreshProfile}
+                        onLaunchQuiz={() => setQuizState('ACTIVE')}
+                        onNavigateTab={handleTabNavigate}
+                        onFightMonster={mon => setSelectedMonster(mon)}
+                        onOpenChest={chest => setSelectedChest(chest)}
+                      />
+                    )}
+                  </>
                 )}
 
-                {/* Idle / Full Lobby Screen */}
-                {quizState === 'IDLE' && (
-                  <LobbyHomeScreen
+                {/* TAB: MAP (Syllabus World Map) */}
+                {currentTab === 'MAP' && <SyllabusWorldMap />}
+
+                {/* TAB: ARENA (Leagues & Campus Battles) */}
+                {currentTab === 'ARENA' && (
+                  <LeaguesAndBattles
                     user={user}
                     profile={profile}
                     onRefreshProfile={handleRefreshProfile}
-                    onLaunchQuiz={() => setQuizState('ACTIVE')}
-                    onNavigateTab={handleTabNavigate}
-                    onFightMonster={mon => setSelectedMonster(mon)}
-                    onOpenChest={chest => setSelectedChest(chest)}
                   />
                 )}
+
+                {/* TAB: CODEX (Monsters, Cosmetics & Mystery Vaults) */}
+                {currentTab === 'CODEX' && (
+                  <CollectionAndChests
+                    user={user}
+                    profile={profile}
+                    onRefreshProfile={handleRefreshProfile}
+                  />
+                )}
+
+                {/* TAB: ME (Profile, Badges & Consolidated Settings) */}
+                {currentTab === 'ME' && (
+                  <ProfileAndSettings
+                    user={user}
+                    profile={profile}
+                    onRefreshProfile={handleRefreshProfile}
+                    theme={theme}
+                    onToggleTheme={() => setTheme(prev => (prev === 'dark' ? 'light' : 'dark'))}
+                    isDyslexic={isDyslexic}
+                    onToggleDyslexic={() => setIsDyslexic(prev => !prev)}
+                    onOpenFeedback={() => setIsFeedbackOpen(true)}
+                    onToggleAnonymous={handleToggleAnonymous}
+                    onLogout={() => {
+                      setUser(null);
+                      setProfile(null);
+                      setAccessToken(null);
+                    }}
+                  />
+                )}
+
+                {/* TAB: FACULTY (Game Master Console) */}
+                {currentTab === 'FACULTY' && (
+                  <FacultyPortal user={user} onRefreshProfile={handleRefreshProfile} />
+                )}
+
+                {/* TAB: STORYBOOK */}
+                {currentTab === 'STORYBOOK' && <StorybookShowcase />}
               </>
             )}
-
-            {/* TAB: MAP (Syllabus World Map) */}
-            {currentTab === 'MAP' && <SyllabusWorldMap />}
-
-            {/* TAB: ARENA (Leagues & Campus Battles) */}
-            {currentTab === 'ARENA' && (
-              <LeaguesAndBattles
-                user={user}
-                profile={profile}
-                onRefreshProfile={handleRefreshProfile}
-              />
-            )}
-
-            {/* TAB: CODEX (Monsters, Cosmetics & Mystery Vaults) */}
-            {currentTab === 'CODEX' && (
-              <CollectionAndChests
-                user={user}
-                profile={profile}
-                onRefreshProfile={handleRefreshProfile}
-              />
-            )}
-
-            {/* TAB: ME (Profile, Badges & Consolidated Settings) */}
-            {currentTab === 'ME' && (
-              <ProfileAndSettings
-                user={user}
-                profile={profile}
-                onRefreshProfile={handleRefreshProfile}
-                theme={theme}
-                onToggleTheme={() => setTheme(prev => (prev === 'dark' ? 'light' : 'dark'))}
-                isDyslexic={isDyslexic}
-                onToggleDyslexic={() => setIsDyslexic(prev => !prev)}
-                onOpenFeedback={() => setIsFeedbackOpen(true)}
-                onToggleAnonymous={handleToggleAnonymous}
-              />
-            )}
-
-            {/* TAB: FACULTY (Game Master Console) */}
-            {currentTab === 'FACULTY' && (
-              <FacultyPortal user={user} onRefreshProfile={handleRefreshProfile} />
-            )}
-
-            {/* TAB: STORYBOOK */}
-            {currentTab === 'STORYBOOK' && <StorybookShowcase />}
           </>
         )}
       </main>
 
-      {/* 4. Tactile Medallion Game Menu (Bottom Nav Dock) */}
-      {quizState !== 'ACTIVE' && currentTab !== 'FACULTY' && currentTab !== 'STORYBOOK' && (
+      {/* 3. Medallion Bottom Navigation */}
+      {user && user.status === 'ACTIVE' && quizState !== 'ACTIVE' && currentTab !== 'FACULTY' && currentTab !== 'STORYBOOK' && (
         <GameBottomMenu
           activeTab={
             ['HOME', 'MAP', 'ARENA', 'CODEX', 'ME'].includes(currentTab)
@@ -451,24 +620,21 @@ export default function Home() {
         />
       )}
 
-      {/* 5. Discreet Judge & Game Master Drawer (Bottom Right) */}
+      {/* 4. Judge & Game Master Drawer */}
       <GameMasterDrawer
         currentRole={user?.role || 'STUDENT'}
         onSwitchRole={handleSwitchRole}
         onOpenStorybook={() => setCurrentTab('STORYBOOK')}
         onAdvanceDay={async () => {
           soundManager.play('levelUp');
-          alert('Fast-forwarded 1 day: Streak checked, new daily run generated.');
           handleRefreshProfile();
         }}
         onRolloverWeek={async () => {
           soundManager.play('leagueClimb');
-          alert('Weekly league rolled over: Top 4 promoted, standings reset.');
           handleRefreshProfile();
         }}
         onSpawnMonster={async () => {
           soundManager.play('gentleWrong');
-          alert('Spawned Mistake Monster in queue for student testing.');
         }}
         onAwardChest={async () => {
           soundManager.play('chestOpen');
@@ -483,7 +649,51 @@ export default function Home() {
         }}
       />
 
-      {/* 6. Mystery Chest Opening Modal */}
+      {/* 5. Auth Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        initialTab={authInitialTab}
+        onSuccess={(authU, authP) => {
+          setUser(authU);
+          setProfile(authP);
+          setIsAuthModalOpen(false);
+          loadQuizQuestions(authU.id);
+        }}
+      />
+
+      {/* 6. DPDP Act Consent Modal */}
+      {user && user.status === 'EMAIL_VERIFIED' && (
+        <ConsentModal
+          isOpen={true}
+          onConsentAccepted={() => {
+            setUser({ ...user, status: 'PROFILE_SETUP' });
+          }}
+        />
+      )}
+
+      {/* 7. Onboarding Wizard */}
+      {user && user.status === 'PROFILE_SETUP' && (
+        <OnboardingWizard
+          user={user}
+          onComplete={(finU, finP) => {
+            setUser(finU);
+            if (finP) setProfile(finP);
+            handleRefreshProfile();
+          }}
+        />
+      )}
+
+      {/* 8. Session Expired Modal */}
+      <SessionExpiredModal
+        isOpen={isSessionExpired}
+        onReLogin={() => {
+          setIsSessionExpired(false);
+          setIsAuthModalOpen(true);
+        }}
+      />
+
+      {/* 9. Mystery Chest Opening Modal */}
       <MysteryChestOpening
         isOpen={!!selectedChest}
         chest={selectedChest}
@@ -495,7 +705,7 @@ export default function Home() {
         }}
       />
 
-      {/* 7. Mistake Monster Revenge Duel Modal */}
+      {/* 10. Mistake Monster Revenge Duel Modal */}
       {selectedMonster && (
         <MistakeMonsterBattle
           monster={{
@@ -516,7 +726,6 @@ export default function Home() {
           }}
           onDefeated={reward => {
             soundManager.play('monsterDefeat');
-            alert(`Monster purified! Earned +${reward.xp} XP and +${reward.shards} Shards!`);
             setSelectedMonster(null);
             handleRefreshProfile();
           }}
@@ -524,7 +733,7 @@ export default function Home() {
         />
       )}
 
-      {/* 8. Pilot Feedback Survey Modal */}
+      {/* 11. Pilot Feedback Survey Modal */}
       <PilotFeedbackModal
         isOpen={isFeedbackOpen}
         onClose={() => setIsFeedbackOpen(false)}

@@ -185,3 +185,63 @@ export declare class MockCodingProfileAdapter implements CodingProfileAdapter {
     verifyOwnership(platform: CodingPlatform, handle: string, verificationToken: string): Promise<boolean>;
     fetchRecentSolves(platform: CodingPlatform, handle: string, sinceDate: string): Promise<SolvedProblem[]>;
 }
+export interface SSOUserProfile {
+    provider: 'google' | 'microsoft' | 'msot_sso';
+    providerUserId: string;
+    email: string;
+    emailVerified: boolean;
+    hostedDomain?: string;
+    fullName: string;
+}
+export interface SSOProvider {
+    verifyIdToken(token: string): Promise<SSOUserProfile | null>;
+    getAuthorizationUrl(state: string, redirectUri: string): string;
+}
+export declare class MockGoogleSSOProvider implements SSOProvider {
+    private allowedDomains;
+    constructor(allowedDomains?: string[]);
+    verifyIdToken(token: string): Promise<SSOUserProfile | null>;
+    getAuthorizationUrl(state: string, redirectUri: string): string;
+}
+export interface EmailMessage {
+    to: string;
+    subject: string;
+    htmlBody: string;
+    textBody?: string;
+    sentAt: string;
+}
+export interface MailAdapter {
+    sendEmail(to: string, subject: string, htmlBody: string, textBody?: string): Promise<boolean>;
+    getSentEmails(): EmailMessage[];
+}
+export declare class MockMailAdapter implements MailAdapter {
+    private sent;
+    sendEmail(to: string, subject: string, htmlBody: string, textBody?: string): Promise<boolean>;
+    getSentEmails(): EmailMessage[];
+    clear(): void;
+}
+export interface RosterRowInput {
+    email: string;
+    fullName: string;
+    rollNumber: string;
+    campusId: string;
+    batchId: string;
+    sectionId: string;
+}
+export interface RosterDryRunPreview {
+    totalRows: number;
+    validRows: RosterRowInput[];
+    invalidRows: {
+        row: number;
+        data: any;
+        reason: string;
+    }[];
+    duplicateRows: {
+        row: number;
+        email: string;
+        rollNumber: string;
+    }[];
+    matchedExistingCount: number;
+    newStudentCount: number;
+}
+export declare function parseRosterCsv(csvContent: string, existingEmails: Set<string>): RosterDryRunPreview;

@@ -1,14 +1,63 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
+let accessToken: string | null = null;
+
+if (typeof window !== 'undefined') {
+  accessToken = localStorage.getItem('msot_access_token');
+}
+
+export function setAccessToken(token: string | null) {
+  accessToken = token;
+  if (typeof window !== 'undefined') {
+    if (token) {
+      localStorage.setItem('msot_access_token', token);
+    } else {
+      localStorage.removeItem('msot_access_token');
+    }
+  }
+}
+
+export function getAccessToken(): string | null {
+  return accessToken;
+}
+
 async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${path}`;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options?.headers as Record<string, string> || {}),
+  };
+
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`;
+  }
+
   const res = await fetch(url, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    credentials: 'include', // Send httpOnly cookies for rotating refresh tokens
+    headers,
   });
+
+  if (res.status === 401 && !path.includes('/auth/login') && !path.includes('/auth/refresh')) {
+    // Attempt token refresh via httpOnly cookie
+    try {
+      const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (refreshRes.ok) {
+        const refreshData = await refreshRes.json();
+        setAccessToken(refreshData.accessToken);
+        headers['Authorization'] = `Bearer ${refreshData.accessToken}`;
+        const retryRes = await fetch(url, { ...options, credentials: 'include', headers });
+        if (retryRes.ok) return retryRes.json();
+      }
+    } catch {
+      // Refresh failed
+    }
+  }
+
   if (!res.ok) {
     const errorBody = await res.json().catch(() => ({}));
     throw new Error(errorBody.error || `HTTP ${res.status}: Failed to fetch ${path}`);
@@ -17,13 +66,199 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  // Auth & Profile
-  login: (email: string, role?: string) =>
-    fetchJson<{ token: string; user: any; profile: any }>('/auth/login', {
+  // ----------------------------------------------------
+  // Identity, Authentication & Lifecycle
+  // ----------------------------------------------------
+  register: (payload: {
+    email: string;
+    password: string;
+    name: string;
+    rollNumber?: string;
+    campusId?: string;
+    batchId?: string;
+    sectionId?: string;
+  }) => fetchJson<{ success: boolean; status: string; message: string }>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+
+  claimInvitation: (payload: { token: string; password: string; name?: string }) =>
+    fetchJson<{ success: boolean; message: string; user: any; profile: any; accessToken: string }>('/auth/claim', {
       method: 'POST',
-      body: JSON.stringify({ email, role }),
+      body: JSON.stringify(payload),
     }),
 
+  verifyEmail: (payload: { token?: string; code?: string; email?: string }) =>
+    fetchJson<{ success: boolean; message: string; user: any }>('/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  resendVerification: (email: string) =>
+    fetchJson<{ success: boolean; message: string }>('/auth/resend-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+
+  login: (payload: { email: string; password?: string; role?: string; totpCode?: string; backupCode?: string }) =>
+    fetchJson<{
+      success: boolean;
+      mfaRequired?: boolean;
+      ticket?: string;
+      accessToken: string;
+      user: any;
+      profile: any;
+    }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  googleSSO: (idToken: string) =>
+    fetchJson<{ success: boolean; accessToken: string; user: any; profile: any }>('/auth/google', {
+      method: 'POST',
+      body: JSON.stringify({ idToken }),
+    }),
+
+  logout: () =>
+    fetchJson<{ success: boolean }>('/auth/logout', {
+      method: 'POST',
+    }),
+
+  logoutAll: () =>
+    fetchJson<{ success: boolean }>('/auth/logout-all', {
+      method: 'POST',
+    }),
+
+  getCurrentUser: () =>
+    fetchJson<{ user: any; profile: any; activeSessionCount: number }>('/auth/me'),
+
+  forgotPassword: (email: string) =>
+    fetchJson<{ success: boolean; message: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (payload: { token: string; newPassword: string }) =>
+    fetchJson<{ success: boolean; message: string }>('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // DPDP Act Consent
+  recordConsent: (payload: { noticeVersion: string; acceptedPurposeIds: string[] }) =>
+    fetchJson<{ success: boolean; consentRecord: any }>('/auth/consent', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // Profile Setup Wizard
+  completeProfileSetup: (payload: {
+    avatarId: string;
+    displayName: string;
+    companionChoice: string;
+    preferredLanguage: 'EN' | 'HINGLISH';
+  }) => fetchJson<{ success: boolean; user: any; profile: any }>('/auth/profile-setup', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+
+  // Sessions Management
+  getSessions: () =>
+    fetchJson<{ sessions: any[] }>('/auth/sessions'),
+
+  revokeSession: (sessionId: string) =>
+    fetchJson<{ success: boolean }>(`/auth/sessions/${sessionId}`, {
+      method: 'DELETE',
+    }),
+
+  // Multi-Factor Authentication (TOTP)
+  setupMfa: () =>
+    fetchJson<{ secret: string; uri: string; backupCodes: string[] }>('/auth/mfa/setup', {
+      method: 'POST',
+    }),
+
+  enableMfa: (code: string) =>
+    fetchJson<{ success: boolean; backupCodes: string[] }>('/auth/mfa/enable', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
+  disableMfa: (payload: { password?: string; totpCode?: string }) =>
+    fetchJson<{ success: boolean }>('/auth/mfa/disable', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // DPDP Data Rights
+  exportData: () =>
+    fetchJson<any>('/auth/dpdp/export'),
+
+  deleteAccount: (payload: { reason?: string }) =>
+    fetchJson<{ success: boolean; message: string; scheduledDeletionAt: string }>('/auth/dpdp/delete', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // ----------------------------------------------------
+  // Admin & Faculty Roster & Approval Management
+  // ----------------------------------------------------
+  previewRoster: (csvContent: string) =>
+    fetchJson<{
+      totalRows: number;
+      validCount: number;
+      invalidCount: number;
+      preview: any[];
+      errors: any[];
+    }>('/admin/roster/preview', {
+      method: 'POST',
+      body: JSON.stringify({ csvContent }),
+    }),
+
+  importRoster: (rows: any[]) =>
+    fetchJson<{ success: boolean; batchId: string; importedCount: number }>('/admin/roster/import', {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    }),
+
+  undoRoster: (batchId: string) =>
+    fetchJson<{ success: boolean; message: string }>(`/admin/roster/undo/${batchId}`, {
+      method: 'POST',
+    }),
+
+  getPendingApprovals: () =>
+    fetchJson<{ requests: any[] }>('/admin/approvals'),
+
+  reviewApproval: (payload: { requestId: string; decision: 'APPROVED' | 'REJECTED'; notes?: string }) =>
+    fetchJson<{ success: boolean; message: string }>('/admin/approvals/review', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getUsersDirectory: (params?: { role?: string; status?: string; campusId?: string; search?: string }) => {
+    const q = new URLSearchParams(params as any).toString();
+    return fetchJson<{ users: any[] }>(`/admin/users${q ? `?${q}` : ''}`);
+  },
+
+  updateUserStatus: (payload: { userId: string; status: string; reason: string }) =>
+    fetchJson<{ success: boolean; user: any }>('/admin/users/status', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+
+  updateUserRole: (payload: { userId: string; role: string; reason: string }) =>
+    fetchJson<{ success: boolean; user: any }>('/admin/users/role', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+
+  getAuditLogs: (params?: { actorId?: string; action?: string; targetType?: string; limit?: number }) => {
+    const q = new URLSearchParams(params as any).toString();
+    return fetchJson<{ logs: any[] }>(`/admin/audit-logs${q ? `?${q}` : ''}`);
+  },
+
+  // ----------------------------------------------------
+  // Student Profile, Gameplay & Quizzes
+  // ----------------------------------------------------
   getProfile: (studentId: string = 'student_1') =>
     fetchJson<{ profile: any; user: any }>(`/student/profile?studentId=${studentId}`),
 
@@ -36,7 +271,6 @@ export const api = {
       body: JSON.stringify({ studentId, isAnonymous }),
     }),
 
-  // Daily Run & Quizzes
   getTodayQuiz: (studentId: string = 'student_1', language: string = 'EN') =>
     fetchJson<{ questions: any[]; alreadyCompleted: boolean; date: string }>(
       `/quiz/today?studentId=${studentId}&language=${language}`

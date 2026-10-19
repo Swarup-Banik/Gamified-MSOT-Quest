@@ -33,6 +33,7 @@ export class FacultyService {
   async getEngagementMetrics(): Promise<{
     totalStudents: number;
     dailyActiveStudents: number;
+    activeToday: number;
     dauPercent: number;
     quizCompletionRatePercent: number;
     totalXpAwardedThisWeek: number;
@@ -69,6 +70,7 @@ export class FacultyService {
     return {
       totalStudents,
       dailyActiveStudents,
+      activeToday: dailyActiveStudents,
       dauPercent: Math.round((dailyActiveStudents / totalStudents) * 100),
       quizCompletionRatePercent: Math.round((completedQuizzesToday / totalStudents) * 100),
       totalXpAwardedThisWeek,
