@@ -25,6 +25,8 @@ export async function createServer(): Promise<FastifyInstance> {
   await app.register(cors, { origin: true });
   await app.register(fastifyWebsocket);
 
+  app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+
   // Initialize DB data and rules
   await xpEngine.initializeDefaultRules();
   await cosmeticsService.initializeDefaultCosmetics();
