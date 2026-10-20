@@ -35,6 +35,16 @@ import {
   DataExportRequest,
   DeletionRequest,
   UserScope,
+  CodingPlatform,
+  ExternalAccount,
+  ExternalVerificationChallenge,
+  ExternalSolve,
+  ExternalSyncRun,
+  ProviderHealth,
+  CuratedProblemList,
+  CuratedProblem,
+  GitHubActivityDay,
+  ExternalConsent,
 } from '@msot/shared';
 
 export interface AuditLogEntry {
@@ -147,6 +157,17 @@ export class Database {
   authAuditEvents: AuthAuditEvent[] = [];
   dataExportRequests = new Map<string, DataExportRequest>();
   deletionRequests = new Map<string, DeletionRequest>();
+
+  // External Coding Practice Integrations
+  externalAccounts = new Map<string, ExternalAccount>();
+  externalVerificationChallenges = new Map<string, ExternalVerificationChallenge>();
+  externalSolves = new Map<string, ExternalSolve>();
+  externalSyncRuns: ExternalSyncRun[] = [];
+  providerHealth = new Map<CodingPlatform, ProviderHealth>();
+  curatedProblemLists = new Map<string, CuratedProblemList>();
+  curatedProblems = new Map<string, CuratedProblem>();
+  githubActivityDays = new Map<string, GitHubActivityDay>();
+  externalConsents = new Map<string, ExternalConsent>();
 
   // Immutable Official Academic Grade Data (Simulated LMS Read-Only View)
   private readonly officialGradesStore: ReadonlyArray<{
@@ -291,6 +312,15 @@ export class Database {
     this.authAuditEvents = [];
     this.dataExportRequests.clear();
     this.deletionRequests.clear();
+    this.externalAccounts.clear();
+    this.externalVerificationChallenges.clear();
+    this.externalSolves.clear();
+    this.externalSyncRuns = [];
+    this.providerHealth.clear();
+    this.curatedProblemLists.clear();
+    this.curatedProblems.clear();
+    this.githubActivityDays.clear();
+    this.externalConsents.clear();
   }
 }
 

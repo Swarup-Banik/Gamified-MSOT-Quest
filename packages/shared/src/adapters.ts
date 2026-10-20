@@ -1,4 +1,4 @@
-import { Question, QuestionDifficulty, QuestionLanguage } from './types.js';
+import { Question, QuestionDifficulty, QuestionLanguage, CodingPlatform } from './types.js';
 
 // ==========================================
 // 1. MSOT Academic Data Adapter Interface
@@ -397,8 +397,6 @@ export class DispatchNotificationAdapter implements NotificationChannel {
 // ==========================================
 // 5. Coding Profile Adapter Interface
 // ==========================================
-
-export type CodingPlatform = 'LEETCODE' | 'CODEFORCES' | 'GITHUB';
 
 export interface SolvedProblem {
   platform: CodingPlatform;

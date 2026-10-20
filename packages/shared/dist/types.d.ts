@@ -397,3 +397,120 @@ export interface UserScope {
     assignedCourses: string[];
     assignedSections: string[];
 }
+export type CodingPlatform = 'GITHUB' | 'LEETCODE' | 'HACKERRANK';
+export type ExternalAccountStatus = 'NOT_LINKED' | 'VERIFYING' | 'VERIFIED' | 'PAUSED' | 'REVOKED';
+export interface CodingProviderCapabilities {
+    supportsSolvedCounts: boolean;
+    supportsPerProblemSubmissions: boolean;
+    supportsOwnershipProof: boolean;
+    supportsDifficulty: boolean;
+    official: boolean;
+}
+export interface SolvedCountsByDifficulty {
+    easy: number;
+    medium: number;
+    hard: number;
+    total: number;
+}
+export interface ExternalAccount {
+    id: string;
+    studentId: string;
+    provider: CodingPlatform;
+    handle: string;
+    status: ExternalAccountStatus;
+    verifiedAt: string | null;
+    lastSyncAt: string | null;
+    unlinkedAt?: string | null;
+    baselineSolvedCounts: SolvedCountsByDifficulty;
+    originalBaselineSolvedCounts: SolvedCountsByDifficulty;
+    totalXpEarned: number;
+    totalSolvesCount: number;
+    encryptedOAuthToken?: string | null;
+    consecutiveFailures: number;
+    pauseReason?: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface ExternalVerificationChallenge {
+    id: string;
+    studentId: string;
+    provider: CodingPlatform;
+    handle: string;
+    challengeCode: string;
+    expiresAt: string;
+    status: 'PENDING' | 'VERIFIED' | 'EXPIRED';
+    createdAt: string;
+}
+export interface ExternalSolve {
+    id: string;
+    studentId: string;
+    provider: CodingPlatform;
+    problemSlug: string;
+    problemTitle: string;
+    difficulty: 'EASY' | 'MEDIUM' | 'HARD';
+    solvedAt: string;
+    source: 'SYNC_POLL' | 'MANUAL_SYNC' | 'FACULTY_CSV';
+    awardedXp: number;
+    awardedLedgerId: string;
+    topicId?: string | null;
+    isTopicAlignedBonus: boolean;
+    idempotencyKey: string;
+}
+export interface ExternalSyncRun {
+    id: string;
+    studentId: string;
+    provider: CodingPlatform;
+    status: 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'CIRCUIT_OPEN';
+    newSolvesDetected: number;
+    xpAwarded: number;
+    startedAt: string;
+    completedAt: string;
+    errorMessage?: string | null;
+}
+export type CircuitBreakerState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+export interface ProviderHealth {
+    provider: CodingPlatform;
+    state: CircuitBreakerState;
+    failureCount: number;
+    lastFailureAt?: string | null;
+    lastSuccessAt?: string | null;
+    cooldownUntil?: string | null;
+    lastErrorMessage?: string | null;
+}
+export interface CuratedProblemList {
+    id: string;
+    title: string;
+    topicId: string;
+    courseId: string;
+    weekNumber: number;
+    createdByFacultyId: string;
+    createdAt: string;
+}
+export interface CuratedProblem {
+    id: string;
+    listId: string;
+    provider: CodingPlatform;
+    problemSlug: string;
+    title: string;
+    difficulty: 'EASY' | 'MEDIUM' | 'HARD';
+    topicId: string;
+    url?: string;
+}
+export interface GitHubActivityDay {
+    id: string;
+    studentId: string;
+    date: string;
+    commitCount: number;
+    linesChanged: number;
+    isNonFork: boolean;
+    awardedLedgerId?: string;
+    awardedXp: number;
+}
+export interface ExternalConsent {
+    id: string;
+    studentId: string;
+    provider: CodingPlatform;
+    consentedAt: string;
+    revokedAt?: string | null;
+    dataTypes: string[];
+}

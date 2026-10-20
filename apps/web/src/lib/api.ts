@@ -441,4 +441,73 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  // ----------------------------------------------------
+  // Coding Practice Integrations (LeetCode, HackerRank, GitHub)
+  // ----------------------------------------------------
+  getIntegrations: () =>
+    fetchJson<{ success: boolean; connections: any[]; health: Record<string, any> }>('/integrations/connections'),
+
+  createIntegrationChallenge: (provider: string, handle: string) =>
+    fetchJson<{ success: boolean; challenge: any }>('/integrations/challenge', {
+      method: 'POST',
+      body: JSON.stringify({ provider, handle }),
+    }),
+
+  verifyIntegrationChallenge: (challengeId: string) =>
+    fetchJson<{ success: boolean; account: any; baseline: any }>('/integrations/verify', {
+      method: 'POST',
+      body: JSON.stringify({ challengeId }),
+    }),
+
+  unlinkIntegration: (provider: string) =>
+    fetchJson<{ success: boolean; account: any }>('/integrations/unlink', {
+      method: 'POST',
+      body: JSON.stringify({ provider }),
+    }),
+
+  syncIntegration: (provider: string) =>
+    fetchJson<{ success: boolean; newSolvesDetected: number; xpAwarded: number; details: any[]; notice?: string }>(
+      '/integrations/sync',
+      {
+        method: 'POST',
+        body: JSON.stringify({ provider }),
+      }
+    ),
+
+  recordIntegrationConsent: (provider: string, consentGiven: boolean) =>
+    fetchJson<{ success: boolean; consent: any }>('/integrations/consent', {
+      method: 'POST',
+      body: JSON.stringify({ provider, consentGiven }),
+    }),
+
+  getIntegrationHealth: () =>
+    fetchJson<{ success: boolean; health: Record<string, any> }>('/integrations/health'),
+
+  tripCircuitBreaker: (provider: string, reason?: string) =>
+    fetchJson<any>('/integrations/circuit-breaker/trip', {
+      method: 'POST',
+      body: JSON.stringify({ provider, reason }),
+    }),
+
+  resetCircuitBreaker: (provider: string) =>
+    fetchJson<any>('/integrations/circuit-breaker/reset', {
+      method: 'POST',
+      body: JSON.stringify({ provider }),
+    }),
+
+  getCuratedProblemLists: () =>
+    fetchJson<{ success: boolean; lists: any[] }>('/faculty/curated-lists'),
+
+  createCuratedProblemList: (data: any) =>
+    fetchJson<{ success: boolean; list: any }>('/faculty/curated-lists', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  importHackerRankCsv: (csvContent: string, dryRun: boolean = true) =>
+    fetchJson<any>('/faculty/import-coding-csv', {
+      method: 'POST',
+      body: JSON.stringify({ csvContent, dryRun }),
+    }),
 };

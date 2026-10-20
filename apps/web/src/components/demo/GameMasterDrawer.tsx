@@ -18,6 +18,8 @@ import {
   RotateCcw,
   AlertCircle,
   Eye,
+  Code,
+  Zap,
 } from 'lucide-react';
 import { soundManager } from '../../lib/sound-manager';
 import { api } from '../../lib/api';
@@ -178,6 +180,53 @@ export function GameMasterDrawer({
     } catch (err: any) {
       soundManager.play('wrong');
       showStatus(`Reset failed: ${err.message}`);
+    }
+  };
+
+  const handleTriggerMockSolves = async () => {
+    soundManager.play('tap');
+    try {
+      const res = await api.syncIntegration('LEETCODE');
+      soundManager.play('correct');
+      showStatus(`Synced LeetCode: +${res.xpAwarded} XP (${res.newSolvesDetected} solves)`);
+    } catch (err: any) {
+      soundManager.play('wrong');
+      showStatus(`Sync failed: ${err.message}`);
+    }
+  };
+
+  const handleTripCircuitBreaker = async () => {
+    soundManager.play('tap');
+    try {
+      await api.tripCircuitBreaker('LEETCODE', 'GM simulated 500 downstream error');
+      soundManager.play('wrong');
+      showStatus('Tripped LeetCode Circuit Breaker to OPEN state');
+    } catch (err: any) {
+      showStatus(`Error: ${err.message}`);
+    }
+  };
+
+  const handleResetCircuitBreaker = async () => {
+    soundManager.play('tap');
+    try {
+      await api.resetCircuitBreaker('LEETCODE');
+      soundManager.play('correct');
+      showStatus('Reset LeetCode Circuit Breaker to CLOSED state');
+    } catch (err: any) {
+      showStatus(`Error: ${err.message}`);
+    }
+  };
+
+  const handleImportContestCsv = async () => {
+    soundManager.play('tap');
+    try {
+      const sampleCsv = 'hacker_id,email,problem_slug,score,solved_at\nalex_coder,student.aarav@msot.edu.in,arrays-ds,100,2026-10-19T10:00:00Z\npriya_sharma,priya.sharma@msot.edu.in,2d-array,100,2026-10-19T10:30:00Z';
+      const res = await api.importHackerRankCsv(sampleCsv, false);
+      soundManager.play('correct');
+      showStatus(`Imported CSV: ${res.validCount} valid submissions committed (+${res.totalProjectedXp} XP)`);
+    } catch (err: any) {
+      soundManager.play('wrong');
+      showStatus(`CSV Import error: ${err.message}`);
     }
   };
 
@@ -376,6 +425,46 @@ export function GameMasterDrawer({
                     </div>
                     <span className="text-[10px] text-slate-400 font-mono">&lt;12ms latency</span>
                   </button>
+                </div>
+
+                {/* Verified Coding & Anti-Gaming Simulators */}
+                <div className="space-y-2 pt-1 border-t border-white/10">
+                  <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Verified Coding &amp; Circuit Breaker Simulators
+                  </span>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <button
+                      onClick={handleTriggerMockSolves}
+                      className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-[#22E3FF]/40 text-left font-semibold text-white flex items-center gap-2"
+                    >
+                      <Code className="w-4 h-4 text-[#22E3FF]" />
+                      <span>Sync LeetCode Solves</span>
+                    </button>
+
+                    <button
+                      onClick={handleImportContestCsv}
+                      className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-[#7CF36B]/40 text-left font-semibold text-white flex items-center gap-2"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-[#7CF36B]" />
+                      <span>Import Contest CSV</span>
+                    </button>
+
+                    <button
+                      onClick={handleTripCircuitBreaker}
+                      className="p-2.5 rounded-xl bg-white/5 hover:bg-[#FF4D5E]/20 border border-[#FF4D5E]/40 text-left font-semibold text-[#FF4D5E] flex items-center gap-2"
+                    >
+                      <ShieldAlert className="w-4 h-4 text-[#FF4D5E]" />
+                      <span>Trip Breaker (OPEN)</span>
+                    </button>
+
+                    <button
+                      onClick={handleResetCircuitBreaker}
+                      className="p-2.5 rounded-xl bg-white/5 hover:bg-[#7CF36B]/20 border border-[#7CF36B]/40 text-left font-semibold text-[#7CF36B] flex items-center gap-2"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-[#7CF36B]" />
+                      <span>Reset Breaker (CLOSED)</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Storybook Link */}

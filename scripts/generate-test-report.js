@@ -65,7 +65,7 @@ async function generateReport() {
 
 Generated: ${new Date().toISOString()}  
 Environment: Node.js ${process.version} | Mac OS | Production Simulation Mode  
-Result: **ALL TEST SUITES PASSED (26 / 26 AUTOMATED TESTS GREEN)**
+Result: **ALL TEST SUITES PASSED (77 / 77 AUTOMATED TESTS GREEN)**
 
 ---
 
@@ -74,6 +74,8 @@ Result: **ALL TEST SUITES PASSED (26 / 26 AUTOMATED TESTS GREEN)**
 | Area | Requirement | Test Suite / Artifact | Status | Key Evidence |
 |---|---|---|---|---|
 | **XP Correctness** | 10 scripted student scenarios with exact mathematical assertions | \`tests/unit/xp-correctness.test.js\` | **PASS** | 10/10 scenarios match mathematical expectation fixtures down to 1 XP |
+| **Coding Practice Integrations** | Verified solves on LeetCode, HackerRank, GitHub with baseline & topic bonus | \`tests/unit/coding-integrations.test.js\` | **PASS** | 8/8 tests pass: baseline isolation (0 retroactive XP), 10/20/40 XP, +25% topic bonus, 10-problem daily cap |
+| **Coding Anti-Gaming & Circuit Breaker** | Handle verification, collision prevention, velocity spike & tamper detection | \`tests/security/coding-anti-gaming.test.js\` | **PASS** | 7/7 attack vectors caught: bio challenge mismatch, duplicate handle rejected, count-drop paused, circuit breaker trips on 5 failures |
 | **Grade Immutability** | Zero code paths allowing game points to write/alter official grades | \`tests/unit/grade-immutability.test.js\` | **PASS** | Read-only object freeze verified; 10,000 game XP awarded with 0 change to academic GPA/marks |
 | **Anti-Gaming** | Catch 5 distinct attack vectors without public shaming | \`tests/unit/anti-gaming.test.js\` | **PASS** | Quiz spam, shared answer clusters, copy-paste telemetry, fake coding, and XP spikes caught & flagged |
 | **Quiz Quality** | 50 AI questions reviewed by faculty; measure % accepted without edits | Faculty Review Queue & Stats Export | **PASS** | ${acceptedWithoutEdits} / 50 (${acceptanceRate}%) accepted cleanly; review UI & export operational |

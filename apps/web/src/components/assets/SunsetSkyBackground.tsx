@@ -1,45 +1,75 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { motionManager } from '../../lib/motion-manager';
+
+export type TimeOfDay = 'SUNRISE' | 'MIDDAY' | 'DUSK' | 'NIGHT';
+
+export function getTimeOfDay(): TimeOfDay {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 8) return 'SUNRISE';
+  if (hour >= 8 && hour < 17) return 'MIDDAY';
+  if (hour >= 17 && hour < 20) return 'DUSK';
+  return 'NIGHT';
+}
+
+const skyGradients: Record<TimeOfDay, string> = {
+  SUNRISE: 'linear-gradient(180deg, #1F1538 0%, #43236A 25%, #8B3C7E 55%, #FF7E5F 80%, #FEB47B 100%)',
+  MIDDAY: 'linear-gradient(180deg, #161D4C 0%, #293882 30%, #4D3DB5 60%, #FF8A2B 85%, #FFD23F 100%)',
+  DUSK: 'linear-gradient(180deg, #1C0B40 0%, #3B1B7D 25%, #5B2EE0 50%, #FF3D9A 78%, #FF8A2B 100%)',
+  NIGHT: 'linear-gradient(180deg, #0D0418 0%, #150826 30%, #200E3D 60%, #381A66 85%, #522785 100%)',
+};
 
 export function SunsetSkyBackground() {
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [reducedMotion, setReducedMotion] = useState(false);
+  const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>('DUSK');
+  const [allowAmbient, setAllowAmbient] = useState(true);
+
+  useEffect(() => {
+    setTimeOfDay(getTimeOfDay());
+    const interval = setInterval(() => setTimeOfDay(getTimeOfDay()), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-      setReducedMotion(media.matches);
+      setAllowAmbient(motionManager.allowsAmbientMotion());
+      const unsub = motionManager.subscribe(() => {
+        setAllowAmbient(motionManager.allowsAmbientMotion());
+      });
 
       const handleMouseMove = (e: MouseEvent) => {
-        if (media.matches) return;
+        if (!motionManager.allows3DTilt()) return;
         const normX = (e.clientX / window.innerWidth - 0.5) * 20; // -10px to +10px
         const normY = (e.clientY / window.innerHeight - 0.5) * 15; // -7.5px to +7.5px
         setMousePos({ x: normX, y: normY });
       };
 
       window.addEventListener('mousemove', handleMouseMove, { passive: true });
-      return () => window.removeEventListener('mousemove', handleMouseMove);
+      return () => {
+        unsub();
+        window.removeEventListener('mousemove', handleMouseMove);
+      };
     }
   }, []);
 
-  const parallaxBack = reducedMotion ? 'translate(0, 0)' : `translate(${mousePos.x * 0.3}px, ${mousePos.y * 0.3}px)`;
-  const parallaxMid = reducedMotion ? 'translate(0, 0)' : `translate(${mousePos.x * 0.6}px, ${mousePos.y * 0.6}px)`;
-  const parallaxFront = reducedMotion ? 'translate(0, 0)' : `translate(${mousePos.x}px, ${mousePos.y}px)`;
+  const parallaxBack = !allowAmbient ? 'translate(0, 0)' : `translate(${mousePos.x * 0.3}px, ${mousePos.y * 0.3}px)`;
+  const parallaxMid = !allowAmbient ? 'translate(0, 0)' : `translate(${mousePos.x * 0.6}px, ${mousePos.y * 0.6}px)`;
+  const parallaxFront = !allowAmbient ? 'translate(0, 0)' : `translate(${mousePos.x}px, ${mousePos.y}px)`;
 
   return (
     <div className="sunset-sky-canvas fixed inset-0 pointer-events-none z-0 overflow-hidden select-none">
-      {/* 1. Deep Sunset Sky Gradient Base */}
+      {/* 1. Dynamic Local Time Sky Gradient Base */}
       <div
-        className="absolute inset-0 bg-gradient-to-b from-[#24104F] via-[#5B2EE0] to-[#FF8A2B] opacity-95"
-        style={{
-          background: 'linear-gradient(180deg, #1C0B40 0%, #3B1B7D 25%, #5B2EE0 50%, #FF3D9A 78%, #FF8A2B 100%)',
-        }}
+        className="absolute inset-0 opacity-95 transition-all duration-1000"
+        style={{ background: skyGradients[timeOfDay] }}
       />
 
-      {/* 2. Twinkling Stars (Parallax Deep Layer) */}
+      {/* 2. Twinkling Stars (Parallax Deep Layer - Brighter at night/sunrise/dusk) */}
       <svg
-        className="absolute inset-0 w-full h-full opacity-80 transition-transform duration-300 ease-out"
+        className={`absolute inset-0 w-full h-full transition-transform duration-300 ease-out ${
+          timeOfDay === 'MIDDAY' ? 'opacity-30' : timeOfDay === 'NIGHT' ? 'opacity-95' : 'opacity-80'
+        }`}
         style={{ transform: parallaxBack }}
         xmlns="http://www.w3.org/2000/svg"
       >
@@ -56,19 +86,23 @@ export function SunsetSkyBackground() {
         <line x1="45%" y1="20%" x2="68%" y2="12%" stroke="rgba(255, 210, 63, 0.2)" strokeWidth="0.8" strokeDasharray="3,3" />
       </svg>
 
-      {/* 3. Drifting Sunset Clouds (Parallax Mid Layer) */}
+      {/* 3. Drifting Sunset/Night Clouds (Parallax Mid Layer) */}
       <div
         className="absolute inset-0 transition-transform duration-300 ease-out"
         style={{ transform: parallaxMid }}
       >
         {/* Upper drifting cloud */}
         <div
-          className="absolute -top-10 left-10 w-[550px] h-48 rounded-full bg-gradient-to-r from-[#FF3D9A]/15 via-[#FF8A2B]/10 to-transparent blur-2xl animate-cloud-drift"
+          className={`absolute -top-10 left-10 w-[550px] h-48 rounded-full bg-gradient-to-r from-[#FF3D9A]/15 via-[#FF8A2B]/10 to-transparent blur-2xl ${
+            allowAmbient ? 'animate-cloud-drift' : ''
+          }`}
           style={{ animationDuration: '90s' }}
         />
         {/* Mid drifting cloud */}
         <div
-          className="absolute top-48 -right-20 w-[600px] h-52 rounded-full bg-gradient-to-l from-[#5B2EE0]/20 via-[#FF3D9A]/15 to-transparent blur-3xl animate-cloud-drift"
+          className={`absolute top-48 -right-20 w-[600px] h-52 rounded-full bg-gradient-to-l from-[#5B2EE0]/20 via-[#FF3D9A]/15 to-transparent blur-3xl ${
+            allowAmbient ? 'animate-cloud-drift' : ''
+          }`}
           style={{ animationDuration: '120s', animationDelay: '-30s' }}
         />
       </div>
@@ -102,54 +136,54 @@ export function SunsetSkyBackground() {
           </radialGradient>
         </defs>
 
-        {/* Distant Floating Island Left */}
-        <g opacity="0.65" className="animate-island-bob" style={{ animationDuration: '7s' }}>
-          <path
-            d="M 60 210 Q 180 180 320 200 Q 240 280 170 310 Q 110 290 60 210 Z"
-            fill="url(#island-grad-back)"
-          />
-          {/* Distant Campus Tower */}
-          <rect x="180" y="110" width="22" height="75" rx="3" fill="#2D1160" />
-          <polygon points="175,110 191,80 207,110" fill="#FFD23F" opacity="0.8" />
-          <circle cx="191" cy="95" r="4" fill="#FFF8E7" />
-        </g>
-
-        {/* Distant Floating Island Right */}
-        <g opacity="0.7" className="animate-island-bob" style={{ animationDuration: '6s', animationDelay: '-2s' }}>
-          <path
-            d="M 1120 180 Q 1280 150 1410 180 Q 1340 270 1260 300 Q 1180 260 1120 180 Z"
-            fill="url(#island-grad-back)"
-          />
-          {/* Glowing Crystal Cluster */}
-          <polygon points="1250,175 1258,135 1266,175" fill="#22E3FF" opacity="0.9" />
-          <polygon points="1264,175 1272,145 1278,175" fill="#22E3FF" opacity="0.7" />
-          <circle cx="1260" cy="155" r="25" fill="url(#crystal-glow)" />
-        </g>
-
-        {/* Foreground Horizon Islands */}
+        {/* Back Layer Islands */}
         <path
-          d="M 0 380 L 0 310 Q 140 270 320 290 Q 520 310 720 280 Q 940 250 1140 290 Q 1320 320 1440 300 L 1440 380 Z"
+          d="M0,280 C200,240 320,290 500,260 C680,230 780,270 940,250 C1100,230 1260,260 1440,240 L1440,380 L0,380 Z"
+          fill="url(#island-grad-back)"
+        />
+
+        {/* Floating Observatory Dome Island (Center Left) */}
+        <g className={allowAmbient ? 'animate-island-bob' : ''} style={{ animationDuration: '8s' }}>
+          <ellipse cx="280" cy="220" rx="140" ry="25" fill="url(#island-grad-front)" />
+          {/* Observatory Tower Silhouette */}
+          <path d="M250,220 L250,175 Q280,145 310,175 L310,220 Z" fill="#240D4F" />
+          <circle cx="280" cy="165" r="14" fill="#5B2EE0" />
+          {/* Glowing Crystal spire */}
+          <line x1="280" y1="151" x2="280" y2="135" stroke="#22E3FF" strokeWidth="2.5" />
+          <circle cx="280" cy="133" r="5" fill="#22E3FF" className="animate-pulse" />
+          <circle cx="280" cy="133" r="16" fill="url(#crystal-glow)" />
+        </g>
+
+        {/* Main Floating Campus Citadel Island (Center Right) */}
+        <g className={allowAmbient ? 'animate-island-bob' : ''} style={{ animationDuration: '9.5s', animationDelay: '-3s' }}>
+          <ellipse cx="880" cy="200" rx="220" ry="32" fill="url(#island-grad-front)" />
+          {/* Citadel Spires & Towers */}
+          <path d="M780,200 L795,140 L810,200 Z" fill="#1C093E" />
+          <path d="M830,200 L845,120 L860,200 Z" fill="#260C54" />
+          <path d="M870,200 L885,90 L900,200 Z" fill="#32106A" />
+          <path d="M910,200 L925,130 L940,200 Z" fill="#260C54" />
+          <path d="M950,200 L965,150 L980,200 Z" fill="#1C093E" />
+          {/* Central Clock Tower Spire Lantern */}
+          <line x1="885" y1="90" x2="885" y2="72" stroke="#FFD23F" strokeWidth="2" />
+          <circle cx="885" cy="70" r="4.5" fill="#FFF8E7" />
+          <circle cx="885" cy="70" r="18" fill="url(#lantern-glow)" className="animate-pulse" />
+        </g>
+
+        {/* Front Foreground Terrain Silhouette */}
+        <path
+          d="M0,320 Q300,280 620,330 T1200,310 Q1340,300 1440,325 L1440,380 L0,380 Z"
           fill="url(#island-grad-front)"
         />
 
-        {/* Hanging Lanterns from Arch */}
-        <g className="animate-lantern-sway" style={{ transformOrigin: '80px 0' }}>
-          <line x1="80" y1="0" x2="80" y2="90" stroke="#FF8A2B" strokeWidth="1.5" strokeDasharray="2,2" />
-          <rect x="70" y="90" width="20" height="28" rx="4" fill="#FF8A2B" stroke="#FFF8E7" strokeWidth="1.5" />
-          <circle cx="80" cy="104" r="5" fill="#FFF8E7" />
-          <circle cx="80" cy="104" r="28" fill="url(#lantern-glow)" opacity="0.6" />
-        </g>
-
-        <g className="animate-lantern-sway" style={{ transformOrigin: '1360px 0', animationDelay: '-1.5s' }}>
-          <line x1="1360" y1="0" x2="1360" y2="70" stroke="#FF8A2B" strokeWidth="1.5" strokeDasharray="2,2" />
-          <rect x="1350" y="70" width="20" height="28" rx="4" fill="#FF8A2B" stroke="#FFF8E7" strokeWidth="1.5" />
-          <circle cx="1360" cy="84" r="5" fill="#FFF8E7" />
-          <circle cx="1360" cy="84" r="28" fill="url(#lantern-glow)" opacity="0.6" />
+        {/* Hanging Lanterns on Tree Arch (Bottom Left) */}
+        <path d="M-20,330 Q60,250 140,265" stroke="#1C093E" strokeWidth="4" fill="none" />
+        <g className={allowAmbient ? 'animate-lantern-sway' : ''} style={{ transformOrigin: '130px 265px' }}>
+          <line x1="130" y1="265" x2="130" y2="285" stroke="#FFD23F" strokeWidth="1.5" />
+          <rect x="123" y="285" width="14" height="20" rx="3" fill="#FF8A2B" stroke="#FFF8E7" strokeWidth="1" />
+          <circle cx="130" cy="295" r="4" fill="#FFF8E7" />
+          <circle cx="130" cy="295" r="16" fill="url(#lantern-glow)" className="animate-pulse" />
         </g>
       </svg>
-
-      {/* 5. Subtle Vignette & Warm Horizon Fog */}
-      <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-[#FF8A2B]/15 via-transparent to-transparent pointer-events-none" />
     </div>
   );
 }

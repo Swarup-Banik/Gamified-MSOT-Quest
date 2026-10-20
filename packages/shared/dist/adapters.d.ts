@@ -1,4 +1,4 @@
-import { QuestionDifficulty, QuestionLanguage } from './types.js';
+import { QuestionDifficulty, QuestionLanguage, CodingPlatform } from './types.js';
 export interface MSOTAttendanceRecord {
     studentId: string;
     courseCode: string;
@@ -169,7 +169,6 @@ export declare class DispatchNotificationAdapter implements NotificationChannel 
     send(payload: NotificationPayload): Promise<boolean>;
     getSentNotifications(): NotificationPayload[];
 }
-export type CodingPlatform = 'LEETCODE' | 'CODEFORCES' | 'GITHUB';
 export interface SolvedProblem {
     platform: CodingPlatform;
     problemId: string;

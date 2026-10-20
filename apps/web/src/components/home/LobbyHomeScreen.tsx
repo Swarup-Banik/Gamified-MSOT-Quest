@@ -28,6 +28,7 @@ import {
 } from '../ui/GameIcons';
 import { soundManager } from '../../lib/sound-manager';
 import { api } from '../../lib/api';
+import { CodeHub } from '../codehub/CodeHub';
 
 interface LobbyHomeScreenProps {
   user: any;
@@ -226,7 +227,16 @@ export function LobbyHomeScreen({
       </section>
 
       {/* ============================================================== */}
-      {/* 2. REAL-DATA GAME MODULES GRID (NO DEAD SPACE)                */}
+      {/* 2. CODE HUB: One-Tap LeetCode, HackerRank & GitHub Practice    */}
+      {/* ============================================================== */}
+      <CodeHub
+        studentId={user?.id || 'student_1'}
+        anonymousMode={user?.privacySettings?.anonymousMode}
+        onNavigateToFullHub={() => onNavigateTab('arena')}
+      />
+
+      {/* ============================================================== */}
+      {/* 3. REAL-DATA GAME MODULES GRID (NO DEAD SPACE)                */}
       {/* ============================================================== */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {/* Module 1: Monsters Waiting (Turn-Based Revenge Arena) */}

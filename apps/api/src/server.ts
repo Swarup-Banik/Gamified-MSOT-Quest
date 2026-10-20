@@ -12,6 +12,7 @@ import {
   MockCodingProfileAdapter,
   QuestionDifficulty,
   QuestionLanguage,
+  CodingPlatform,
 } from '@msot/shared';
 import { db } from './db.js';
 import { redis } from './redis.js';
@@ -30,6 +31,8 @@ import { sessionsService } from './services/sessions-service.js';
 import { rosterService } from './services/roster-service.js';
 import { auditService } from './services/audit-service.js';
 import { rateLimiter } from './services/rate-limiter.js';
+import { codingIntegrationService } from './services/coding-integration-service.js';
+import { circuitBreaker } from './services/circuit-breaker.js';
 
 export async function createServer(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
@@ -2212,7 +2215,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const profile = db.externalProfiles.get(req.body.profileId);
     if (!profile) throw new Error('Profile not found');
     const adapter = new MockCodingProfileAdapter();
-    const verified = await adapter.verifyOwnership(profile.platform, profile.handle, profile.verificationChallenge);
+    const verified = await adapter.verifyOwnership(profile.platform as any, profile.handle, profile.verificationChallenge);
     profile.isVerified = verified;
     db.externalProfiles.set(profile.id, profile);
     return { success: verified, profile };
@@ -2252,6 +2255,299 @@ export async function createServer(): Promise<FastifyInstance> {
     ).join('\n');
     return header + rows;
   });
+
+  // ================================================================
+  // VERIFIED CODING PRACTICE INTEGRATIONS (LeetCode, HackerRank, GitHub)
+  // ================================================================
+
+  // 1. Get connected accounts & status
+  app.get('/api/integrations/connections', async (req, reply) => {
+    const user = extractUser(req);
+    if (!user) {
+      return reply.status(401).send({ error: 'Unauthorized: login required' });
+    }
+    const connections = await codingIntegrationService.getConnectedAccounts(user.id);
+    const health = circuitBreaker.getAllHealth();
+    return { success: true, connections, health };
+  });
+
+  // 2. Generate verification challenge token for account ownership proof
+  app.post(
+    '/api/integrations/challenge',
+    async (
+      req: FastifyRequest<{
+        Body: { provider: CodingPlatform; handle: string };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user) {
+        return reply.status(401).send({ error: 'Unauthorized: login required' });
+      }
+      const { provider, handle } = req.body || {};
+      if (!provider || !handle) {
+        return reply.status(400).send({ error: 'Provider and handle are required' });
+      }
+
+      try {
+        const challenge = await codingIntegrationService.generateVerificationChallenge(
+          user.id,
+          provider,
+          handle
+        );
+        return { success: true, challenge };
+      } catch (err: any) {
+        return reply.status(400).send({ error: err.message });
+      }
+    }
+  );
+
+  // 3. Verify challenge and link account
+  app.post(
+    '/api/integrations/verify',
+    async (
+      req: FastifyRequest<{
+        Body: { challengeId: string };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user) {
+        return reply.status(401).send({ error: 'Unauthorized: login required' });
+      }
+      const { challengeId } = req.body || {};
+      if (!challengeId) {
+        return reply.status(400).send({ error: 'challengeId is required' });
+      }
+
+      try {
+        const result = await codingIntegrationService.verifyChallenge(challengeId);
+        return { success: true, account: result.account, baseline: result.baseline };
+      } catch (err: any) {
+        return reply.status(400).send({ error: err.message });
+      }
+    }
+  );
+
+  // 4. Unlink account
+  app.post(
+    '/api/integrations/unlink',
+    async (
+      req: FastifyRequest<{
+        Body: { provider: CodingPlatform };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user) {
+        return reply.status(401).send({ error: 'Unauthorized: login required' });
+      }
+      const { provider } = req.body || {};
+      if (!provider) {
+        return reply.status(400).send({ error: 'Provider is required' });
+      }
+
+      try {
+        const account = await codingIntegrationService.unlinkAccount(user.id, provider);
+        return { success: true, account };
+      } catch (err: any) {
+        return reply.status(400).send({ error: err.message });
+      }
+    }
+  );
+
+  // 5. Sync account solves & earn XP
+  app.post(
+    '/api/integrations/sync',
+    async (
+      req: FastifyRequest<{
+        Body: { provider: CodingPlatform };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user) {
+        return reply.status(401).send({ error: 'Unauthorized: login required' });
+      }
+      const { provider } = req.body || {};
+      if (!provider) {
+        return reply.status(400).send({ error: 'Provider is required' });
+      }
+
+      try {
+        const result = await codingIntegrationService.syncExternalAccount(user.id, provider, true);
+        return result;
+      } catch (err: any) {
+        return reply.status(400).send({ error: err.message });
+      }
+    }
+  );
+
+  // 6. Record user consent
+  app.post(
+    '/api/integrations/consent',
+    async (
+      req: FastifyRequest<{
+        Body: { provider: CodingPlatform; consentGiven: boolean };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user) {
+        return reply.status(401).send({ error: 'Unauthorized: login required' });
+      }
+      const { provider, consentGiven } = req.body || {};
+      if (!provider || consentGiven === undefined) {
+        return reply.status(400).send({ error: 'Provider and consentGiven are required' });
+      }
+
+      const ip = getClientIp(req);
+      const consent = await codingIntegrationService.recordConsent(
+        user.id,
+        provider,
+        consentGiven,
+        ip
+      );
+      return { success: true, consent };
+    }
+  );
+
+  // 7. Provider circuit breaker health
+  app.get('/api/integrations/health', async () => {
+    return { success: true, health: circuitBreaker.getAllHealth() };
+  });
+
+  // 8. Admin / GM test endpoint: Trip circuit breaker
+  app.post(
+    '/api/integrations/circuit-breaker/trip',
+    async (
+      req: FastifyRequest<{
+        Body: { provider: CodingPlatform; reason?: string };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user || (user.role !== 'ADMIN' && user.role !== 'FACULTY')) {
+        return reply.status(403).send({ error: 'Forbidden: Admin or Faculty role required' });
+      }
+      const { provider, reason } = req.body || {};
+      if (!provider) {
+        return reply.status(400).send({ error: 'Provider is required' });
+      }
+
+      circuitBreaker.trip(provider, reason || 'Manual simulation trip');
+      return {
+        success: true,
+        message: `Circuit breaker tripped for ${provider}`,
+        health: circuitBreaker.getHealth(provider),
+      };
+    }
+  );
+
+  // 9. Admin / GM test endpoint: Reset circuit breaker
+  app.post(
+    '/api/integrations/circuit-breaker/reset',
+    async (
+      req: FastifyRequest<{
+        Body: { provider: CodingPlatform };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user || (user.role !== 'ADMIN' && user.role !== 'FACULTY')) {
+        return reply.status(403).send({ error: 'Forbidden: Admin or Faculty role required' });
+      }
+      const { provider } = req.body || {};
+      if (!provider) {
+        return reply.status(400).send({ error: 'Provider is required' });
+      }
+
+      circuitBreaker.reset(provider);
+      return {
+        success: true,
+        message: `Circuit breaker reset for ${provider}`,
+        health: circuitBreaker.getHealth(provider),
+      };
+    }
+  );
+
+  // 10. Faculty Curated Problem Lists
+  app.get('/api/faculty/curated-lists', async () => {
+    const lists = await codingIntegrationService.getCuratedLists();
+    return { success: true, lists };
+  });
+
+  app.post(
+    '/api/faculty/curated-lists',
+    async (
+      req: FastifyRequest<{
+        Body: {
+          title: string;
+          topicTag: string;
+          weekNumber: number;
+          problems: Array<{
+            provider: CodingPlatform;
+            problemSlug: string;
+            title: string;
+            difficulty: 'EASY' | 'MEDIUM' | 'HARD';
+          }>;
+        };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user || (user.role !== 'FACULTY' && user.role !== 'ADMIN')) {
+        return reply.status(403).send({ error: 'Forbidden: Faculty or Admin role required' });
+      }
+
+      const { title, topicTag, weekNumber, problems } = req.body || {};
+      if (!title || !topicTag || !weekNumber) {
+        return reply.status(400).send({ error: 'title, topicTag, and weekNumber are required' });
+      }
+
+      const list = await codingIntegrationService.createCuratedList({
+        title,
+        topicTag,
+        weekNumber,
+        createdBy: user.id,
+        problems: problems || [],
+      });
+
+      return { success: true, list };
+    }
+  );
+
+  // 11. Faculty HackerRank / Contest CSV Import
+  app.post(
+    '/api/faculty/import-coding-csv',
+    async (
+      req: FastifyRequest<{
+        Body: {
+          csvContent: string;
+          dryRun?: boolean;
+        };
+      }>,
+      reply
+    ) => {
+      const user = extractUser(req);
+      if (!user || (user.role !== 'FACULTY' && user.role !== 'ADMIN')) {
+        return reply.status(403).send({ error: 'Forbidden: Faculty or Admin role required' });
+      }
+
+      const { csvContent, dryRun } = req.body || {};
+      if (!csvContent) {
+        return reply.status(400).send({ error: 'csvContent is required' });
+      }
+
+      const result = await codingIntegrationService.importFacultyCodingCsv(
+        user.id,
+        csvContent,
+        dryRun !== false
+      );
+
+      return { success: true, ...result };
+    }
+  );
 
   return app;
 }

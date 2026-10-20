@@ -4,6 +4,16 @@
  * Supports mute toggle, separate volume sliders, and mobile haptic vibration patterns.
  */
 
+export type PressableRole =
+  | 'primary'
+  | 'secondary'
+  | 'danger'
+  | 'success'
+  | 'navigation'
+  | 'toggle'
+  | 'close'
+  | 'disabled';
+
 class SoundManager {
   private ctx: AudioContext | null = null;
   private soundEnabled: boolean = false; // Enabled after first user gesture
@@ -101,9 +111,15 @@ class SoundManager {
 
   // --- SOUND EFFECTS ---
 
-  public playTap() {
-    this.vibrate(15);
-    if (!this.soundEnabled) return;
+  public playPressTick(role: PressableRole = 'primary', panX?: number) {
+    if (!this.soundEnabled) {
+      if (role === 'disabled') this.vibrate(8);
+      else if (role === 'danger') this.vibrate(25);
+      else if (role === 'success') this.vibrate([12, 18]);
+      else this.vibrate(12);
+      return;
+    }
+
     const ctx = this.initContext();
     if (!ctx) return;
 
@@ -111,17 +127,121 @@ class SoundManager {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(650, now);
-    osc.frequency.exponentialRampToValueAtTime(1100, now + 0.035);
+    // Stereo Panning if supported & panX (-1 to +1) provided
+    let outputNode: AudioNode = gain;
+    if (panX !== undefined && typeof (ctx as any).createStereoPanner === 'function') {
+      try {
+        const panner = (ctx as any).createStereoPanner();
+        panner.pan.setValueAtTime(Math.max(-1, Math.min(1, panX)), now);
+        gain.connect(panner);
+        outputNode = panner;
+      } catch {
+        // Fallback to direct routing
+      }
+    }
+    outputNode.connect(ctx.destination);
 
-    gain.gain.setValueAtTime(0.08 * this.sfxVolume, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+    switch (role) {
+      case 'primary':
+        this.vibrate(15);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(750, now);
+        osc.frequency.exponentialRampToValueAtTime(1200, now + 0.035);
+        gain.gain.setValueAtTime(0.09 * this.sfxVolume, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(now + 0.04);
+        break;
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.04);
+      case 'secondary':
+        this.vibrate(10);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(580, now);
+        osc.frequency.exponentialRampToValueAtTime(880, now + 0.028);
+        gain.gain.setValueAtTime(0.06 * this.sfxVolume, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.032);
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(now + 0.032);
+        break;
+
+      case 'danger':
+        this.vibrate(25);
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(190, now);
+        osc.frequency.exponentialRampToValueAtTime(110, now + 0.045);
+        gain.gain.setValueAtTime(0.12 * this.sfxVolume, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(now + 0.05);
+        break;
+
+      case 'success':
+        this.vibrate([12, 18]);
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.setValueAtTime(1320, now + 0.02);
+        gain.gain.setValueAtTime(0.12 * this.sfxVolume, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(now + 0.045);
+        break;
+
+      case 'navigation':
+        this.vibrate(10);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(950, now);
+        osc.frequency.exponentialRampToValueAtTime(700, now + 0.025);
+        gain.gain.setValueAtTime(0.07 * this.sfxVolume, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(now + 0.03);
+        break;
+
+      case 'toggle':
+        this.vibrate(12);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(680, now);
+        osc.frequency.exponentialRampToValueAtTime(920, now + 0.025);
+        gain.gain.setValueAtTime(0.08 * this.sfxVolume, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(now + 0.03);
+        break;
+
+      case 'close':
+        this.vibrate(10);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(620, now);
+        osc.frequency.exponentialRampToValueAtTime(380, now + 0.025);
+        gain.gain.setValueAtTime(0.07 * this.sfxVolume, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(now + 0.03);
+        break;
+
+      case 'disabled':
+        this.vibrate(8);
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(130, now);
+        osc.frequency.exponentialRampToValueAtTime(85, now + 0.035);
+        gain.gain.setValueAtTime(0.08 * this.sfxVolume, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(now + 0.04);
+        break;
+    }
+  }
+
+  public playTap() {
+    this.playPressTick('primary');
   }
 
   public playCorrect() {

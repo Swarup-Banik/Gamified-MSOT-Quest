@@ -36,6 +36,7 @@ import { FlameGenerator } from '../assets/FlameGenerator';
 import { TitleBadge } from '../assets/TitleBadge';
 import { AssetAdapter } from '../assets/AssetAdapter';
 import { RarityBadge } from '../ui/RarityBadge';
+import { ConnectionsWizard } from './ConnectionsWizard';
 import { soundManager } from '../../lib/sound-manager';
 import { api, setAccessToken } from '../../lib/api';
 
@@ -339,6 +340,9 @@ export function ProfileAndSettings({
           ))}
         </div>
       </div>
+
+      {/* Verified Coding Practice Connections Wizard */}
+      <ConnectionsWizard onXpAwarded={onRefreshProfile} />
 
       {/* Security, Active Sessions & Two-Factor Authentication */}
       <div className="panel-quest-board p-6 space-y-5">

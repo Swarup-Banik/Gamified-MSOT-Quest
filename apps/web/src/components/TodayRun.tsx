@@ -14,6 +14,7 @@ import {
   Zap,
   Play,
   RotateCcw,
+  Code,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { api } from '../lib/api';
@@ -43,8 +44,38 @@ export function TodayRun({ user, profile, onRefreshProfile }: TodayRunProps) {
   const [rewardChest, setRewardChest] = useState<any | null>(null);
   const [isOpeningChestModal, setIsOpeningChestModal] = useState(false);
   const [runSummary, setRunSummary] = useState<any | null>(null);
+  const [codingSyncing, setCodingSyncing] = useState(false);
+  const [codingSyncNotice, setCodingSyncNotice] = useState<string | null>(null);
 
   const { triggerLevelUp } = useReward();
+
+  const handleSyncCodingPractice = async () => {
+    soundManager.play('tap');
+    setCodingSyncing(true);
+    setCodingSyncNotice(null);
+    try {
+      const res = await api.syncIntegration('LEETCODE').catch(() => null);
+      const ghRes = await api.syncIntegration('GITHUB').catch(() => null);
+      const totalXp = (res?.xpAwarded || 0) + (ghRes?.xpAwarded || 0);
+      const totalSolves = (res?.newSolvesDetected || 0) + (ghRes?.newSolvesDetected || 0);
+
+      if (totalXp > 0) {
+        soundManager.play('levelUp');
+        confetti({ particleCount: 60, spread: 60 });
+        setCodingSyncNotice(`🎉 Synced ${totalSolves} new problem(s)! +${totalXp} XP awarded.`);
+        triggerLevelUp();
+        onRefreshProfile();
+      } else {
+        soundManager.play('correct');
+        setCodingSyncNotice('Coding practice is up to date! Solve problems on LeetCode or commit to GitHub to earn XP.');
+      }
+    } catch (err: any) {
+      soundManager.play('wrong');
+      setCodingSyncNotice(err.message || 'Sync failed. Connect accounts in Me page.');
+    } finally {
+      setCodingSyncing(false);
+    }
+  };
 
   // Multi-format fallback questions ensuring variety
   const sampleFallbackQuestions: QuizQuestion[] = [
@@ -364,6 +395,40 @@ export function TodayRun({ user, profile, onRefreshProfile }: TodayRunProps) {
                 </GameButton>
               </div>
             </div>
+          </div>
+
+          {/* Daily Coding Practice Quest */}
+          <div className="card-quest p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border border-[#22E3FF]/30 bg-gradient-to-r from-[#1B1740] to-[#24104F] shadow-lg rounded-2xl">
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-[#22E3FF]/20 border border-[#22E3FF]/40 flex items-center justify-center text-[#22E3FF] shrink-0">
+                <Code className="w-6 h-6" />
+              </div>
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="font-display text-xs text-[#22E3FF] uppercase tracking-wider">
+                    Coding Practice Quest
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-[#FFD23F]/20 text-[#FFD23F] font-bold text-[10px] border border-[#FFD23F]/40">
+                    +10 to +40 XP
+                  </span>
+                </div>
+                <h4 className="font-display text-sm text-white">
+                  Solve 1 Problem on LeetCode / HackerRank or Push to GitHub
+                </h4>
+                <p className="text-[11px] text-slate-300">
+                  {codingSyncNotice || 'Verified solves sync directly into your immutable XP ledger with topic-aligned bonuses.'}
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={handleSyncCodingPractice}
+              disabled={codingSyncing}
+              className="px-4 py-2 rounded-xl btn-sunset-3d btn-3d-cyan text-xs font-bold shrink-0 flex items-center gap-1.5 self-end sm:self-center"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${codingSyncing ? 'animate-spin' : ''}`} />
+              <span>{codingSyncing ? 'Syncing...' : 'Sync Solves'}</span>
+            </button>
           </div>
 
           {/* Active Mistake Monsters Encounter Deck */}

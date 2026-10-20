@@ -377,3 +377,47 @@ body {
 .animate-wiggle {
   animation: wiggle 0.25s ease-in-out infinite;
 }
+
+/* ============================================================== */
+/* CRAFT DETAILING: Scrollbars, Selection, Focus, Texture         */
+/* ============================================================== */
+
+/* Custom Sunset Realm Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #15062C;
+}
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #5B2EE0, #FF3D9A);
+  border-radius: 9999px;
+  border: 2px solid #15062C;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #7C52FF, #FF8A2B);
+}
+
+/* Custom Text Selection */
+::selection {
+  background: #FFD23F;
+  color: #1A0933;
+}
+::-moz-selection {
+  background: #FFD23F;
+  color: #1A0933;
+}
+
+/* Accessible Focus Rings */
+:focus-visible {
+  outline: 3px solid #FFD23F !important;
+  outline-offset: 2px !important;
+}
+
+/* Subtle Film Grain Texture Overlay on Game Panels */
+.grain-overlay {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 0);
+  background-size: 16px 16px;
+}
+

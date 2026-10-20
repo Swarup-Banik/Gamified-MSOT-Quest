@@ -1,10 +1,13 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import confetti from 'canvas-confetti';
-import { sound } from './sound-manager';
+import { sound, PressableRole } from './sound-manager';
+import { motionManager, SensoryMode } from './motion-manager';
 
-export type RewardType =
+export type CelebrationTier = 'MICRO' | 'SMALL' | 'MEDIUM' | 'LARGE' | 'EPIC';
+
+export type LegacyRewardType =
   | 'CORRECT_ANSWER'
   | 'WRONG_ANSWER'
   | 'COMBO_STEP'
@@ -14,164 +17,257 @@ export type RewardType =
   | 'MONSTER_HIT'
   | 'MONSTER_DEFEAT'
   | 'STREAK_PRESERVED'
-  | 'LEAGUE_PROMOTION';
+  | 'LEAGUE_PROMOTION'
+  | 'CODING_PRACTICE_SOLVE';
 
-export interface RewardOptions {
-  type: RewardType;
+export interface CelebrationPayload {
+  tier: CelebrationTier;
+  title?: string;
+  subtitle?: string;
+  xpAmount?: number;
+  gemsAmount?: number;
+  rarity?: 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
+  onComplete?: () => void;
+}
+
+export interface LegacyRewardOptions {
+  type: LegacyRewardType;
   xpAmount?: number;
   comboCount?: number;
   rarity?: 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
   originElement?: HTMLElement | null;
 }
 
-export function useReward() {
-  const triggerReward = useCallback((options: RewardOptions) => {
-    const prefersReducedMotion =
-      typeof window !== 'undefined' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Global active celebration state & queue (singleton pattern for concurrency)
+let activeCelebration: CelebrationPayload | null = null;
+const celebrationQueue: CelebrationPayload[] = [];
+const subscribers = new Set<(c: CelebrationPayload | null) => void>();
 
-    switch (options.type) {
-      case 'CORRECT_ANSWER':
-        sound.playCorrect();
-        if (!prefersReducedMotion) {
-          confetti({
-            particleCount: 35,
-            spread: 55,
-            origin: { y: 0.7 },
-            colors: ['#3DDC97', '#FFC83D', '#4CC9F0'],
-          });
-        }
-        break;
+function notifySubscribers() {
+  subscribers.forEach((cb) => cb(activeCelebration));
+}
 
-      case 'WRONG_ANSWER':
-        sound.playGentleWrong();
-        break;
-
-      case 'COMBO_STEP':
-        sound.playCombo(options.comboCount || 1);
-        if (!prefersReducedMotion && (options.comboCount || 1) >= 3) {
-          confetti({
-            particleCount: 20,
-            spread: 40,
-            origin: { y: 0.75 },
-            colors: ['#FFC83D', '#FF8A3D'],
-          });
-        }
-        break;
-
-      case 'LEVEL_UP':
-        sound.playLevelUp();
-        if (!prefersReducedMotion) {
-          confetti({
-            particleCount: 100,
-            spread: 90,
-            origin: { y: 0.5 },
-            colors: ['#FFC83D', '#B26CFF', '#4CC9F0', '#3DDC97'],
-          });
-        }
-        break;
-
-      case 'CHEST_SHAKE':
-        sound.playChestShake();
-        break;
-
-      case 'CHEST_OPEN':
-        sound.playChestOpen(options.rarity || 'COMMON');
-        if (!prefersReducedMotion) {
-          const colors =
-            options.rarity === 'LEGENDARY'
-              ? ['#FFC83D', '#FF8A3D', '#FFE680']
-              : options.rarity === 'EPIC'
-              ? ['#B26CFF', '#E0A8FF', '#4CC9F0']
-              : ['#3DDC97', '#4CC9F0', '#FFC83D'];
-
-          confetti({
-            particleCount: options.rarity === 'LEGENDARY' ? 140 : 80,
-            spread: 80,
-            origin: { y: 0.6 },
-            colors,
-          });
-        }
-        break;
-
-      case 'MONSTER_HIT':
-        sound.playMonsterHit();
-        break;
-
-      case 'MONSTER_DEFEAT':
-        sound.playMonsterDefeat();
-        if (!prefersReducedMotion) {
-          confetti({
-            particleCount: 50,
-            spread: 65,
-            origin: { y: 0.65 },
-            colors: ['#FF5E6C', '#FFC83D', '#B26CFF'],
-          });
-        }
-        break;
-
-      case 'STREAK_PRESERVED':
-        sound.playCorrect();
-        if (!prefersReducedMotion) {
-          confetti({
-            particleCount: 30,
-            spread: 45,
-            origin: { y: 0.7 },
-            colors: ['#4CC9F0', '#3DDC97'],
-          });
-        }
-        break;
-
-      case 'LEAGUE_PROMOTION':
-        sound.playLevelUp();
-        if (!prefersReducedMotion) {
-          confetti({
-            particleCount: 80,
-            spread: 80,
-            origin: { y: 0.55 },
-            colors: ['#FFC83D', '#3DDC97'],
-          });
-        }
-        break;
+export function dismissCurrentCelebration() {
+  if (activeCelebration) {
+    if (activeCelebration.onComplete) {
+      activeCelebration.onComplete();
     }
+    activeCelebration = null;
+    notifySubscribers();
+
+    // Process next in queue if available
+    if (celebrationQueue.length > 0) {
+      const next = celebrationQueue.shift()!;
+      playCelebration(next);
+    }
+  }
+}
+
+function playCelebration(payload: CelebrationPayload) {
+  const sensoryMode = motionManager.getSensoryMode();
+  const particleScale = motionManager.getParticleScale();
+
+  if (sensoryMode === 'MINIMAL') {
+    // Instant completion without particle cannon or delays
+    sound.playPressTick('success');
+    if (payload.onComplete) payload.onComplete();
+    return;
+  }
+
+  // If a hero celebration is already active, enqueue this one
+  if (activeCelebration && (payload.tier === 'LARGE' || payload.tier === 'EPIC')) {
+    celebrationQueue.push(payload);
+    return;
+  }
+
+  activeCelebration = payload;
+  notifySubscribers();
+
+  switch (payload.tier) {
+    case 'MICRO': {
+      sound.playPressTick('primary');
+      setTimeout(() => dismissCurrentCelebration(), 120);
+      break;
+    }
+
+    case 'SMALL': {
+      sound.playCorrect();
+      if (particleScale > 0) {
+        confetti({
+          particleCount: Math.round(25 * particleScale),
+          spread: 50,
+          origin: { y: 0.7 },
+          colors: ['#3DDC97', '#FFD23F', '#22E3FF'],
+        });
+      }
+      setTimeout(() => dismissCurrentCelebration(), 800);
+      break;
+    }
+
+    case 'MEDIUM': {
+      sound.playCombo(3);
+      if (particleScale > 0) {
+        confetti({
+          particleCount: Math.round(60 * particleScale),
+          spread: 70,
+          origin: { y: 0.65 },
+          colors: ['#FFD23F', '#FF5E6C', '#B26CFF', '#3DDC97'],
+        });
+      }
+      setTimeout(() => dismissCurrentCelebration(), 1500);
+      break;
+    }
+
+    case 'LARGE': {
+      sound.playLevelUp();
+      if (particleScale > 0 && motionManager.canFlash()) {
+        // Dual confetti cannon from left and right
+        confetti({
+          particleCount: Math.round(60 * particleScale),
+          angle: 60,
+          spread: 55,
+          origin: { x: 0, y: 0.7 },
+          colors: ['#FFD23F', '#B26CFF', '#22E3FF', '#3DDC97'],
+        });
+        confetti({
+          particleCount: Math.round(60 * particleScale),
+          angle: 120,
+          spread: 55,
+          origin: { x: 1, y: 0.7 },
+          colors: ['#FFD23F', '#B26CFF', '#22E3FF', '#3DDC97'],
+        });
+      }
+      setTimeout(() => dismissCurrentCelebration(), 2500);
+      break;
+    }
+
+    case 'EPIC': {
+      sound.playChestOpen(payload.rarity || 'LEGENDARY');
+      if (particleScale > 0 && motionManager.canFlash()) {
+        // Stage 1 burst
+        confetti({
+          particleCount: Math.round(80 * particleScale),
+          spread: 100,
+          origin: { y: 0.5 },
+          colors: ['#FFD23F', '#FFA500', '#FF4D5E', '#B26CFF'],
+        });
+        // Stage 2 burst after 300ms
+        setTimeout(() => {
+          if (activeCelebration?.tier === 'EPIC') {
+            confetti({
+              particleCount: Math.round(60 * particleScale),
+              spread: 120,
+              origin: { y: 0.4 },
+              colors: ['#22E3FF', '#3DDC97', '#FFD23F'],
+            });
+          }
+        }, 300);
+      }
+      setTimeout(() => dismissCurrentCelebration(), 3500);
+      break;
+    }
+  }
+}
+
+export function useReward() {
+  const [active, setActive] = useState<CelebrationPayload | null>(activeCelebration);
+
+  useEffect(() => {
+    subscribers.add(setActive);
+    return () => {
+      subscribers.delete(setActive);
+    };
   }, []);
 
-  const triggerCorrect = useCallback(() => {
-    triggerReward({ type: 'CORRECT_ANSWER' });
-  }, [triggerReward]);
+  // Global single-tap / escape key dismiss listener
+  useEffect(() => {
+    if (!active) return;
 
-  const triggerGentleWrong = useCallback(() => {
-    triggerReward({ type: 'WRONG_ANSWER' });
-  }, [triggerReward]);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        dismissCurrentCelebration();
+      }
+    };
 
-  const triggerCombo = useCallback((comboCount: number = 1) => {
-    triggerReward({ type: 'COMBO_STEP', comboCount });
-  }, [triggerReward]);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [active]);
 
-  const triggerLevelUp = useCallback(() => {
-    triggerReward({ type: 'LEVEL_UP' });
-  }, [triggerReward]);
+  const triggerCelebration = useCallback((payload: CelebrationPayload) => {
+    playCelebration(payload);
+  }, []);
 
-  const triggerChestOpen = useCallback((rarity: 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY' = 'COMMON') => {
-    triggerReward({ type: 'CHEST_OPEN', rarity });
-  }, [triggerReward]);
-
-  const triggerMonsterHit = useCallback(() => {
-    triggerReward({ type: 'MONSTER_HIT' });
-  }, [triggerReward]);
-
-  const triggerMonsterDefeat = useCallback(() => {
-    triggerReward({ type: 'MONSTER_DEFEAT' });
-  }, [triggerReward]);
+  // Legacy API wrapper for backwards compatibility across existing components
+  const triggerReward = useCallback(
+    (options: LegacyRewardOptions) => {
+      switch (options.type) {
+        case 'CORRECT_ANSWER':
+          playCelebration({ tier: 'SMALL', title: 'Correct!', xpAmount: options.xpAmount || 15 });
+          break;
+        case 'WRONG_ANSWER':
+          sound.playGentleWrong();
+          break;
+        case 'COMBO_STEP':
+          sound.playCombo(options.comboCount || 1);
+          if ((options.comboCount || 1) >= 3) {
+            playCelebration({ tier: 'SMALL', title: `${options.comboCount}x Combo!` });
+          }
+          break;
+        case 'LEVEL_UP':
+          playCelebration({ tier: 'LARGE', title: 'Level Up!', subtitle: 'New powers unlocked!' });
+          break;
+        case 'CHEST_SHAKE':
+          sound.playChestShake();
+          break;
+        case 'CHEST_OPEN':
+          playCelebration({
+            tier: options.rarity === 'LEGENDARY' || options.rarity === 'EPIC' ? 'EPIC' : 'MEDIUM',
+            title: 'Chest Unlocked!',
+            rarity: options.rarity,
+          });
+          break;
+        case 'MONSTER_HIT':
+          sound.playMonsterHit();
+          break;
+        case 'MONSTER_DEFEAT':
+          playCelebration({
+            tier: 'MEDIUM',
+            title: 'Monster Defeated!',
+            subtitle: 'Topic mastery strengthened',
+          });
+          break;
+        case 'STREAK_PRESERVED':
+          playCelebration({ tier: 'SMALL', title: 'Streak Protected!' });
+          break;
+        case 'LEAGUE_PROMOTION':
+          playCelebration({ tier: 'LARGE', title: 'Promoted to Higher League!' });
+          break;
+        case 'CODING_PRACTICE_SOLVE':
+          playCelebration({
+            tier: 'SMALL',
+            title: 'Verified Solve Synced!',
+            xpAmount: options.xpAmount || 20,
+          });
+          break;
+      }
+    },
+    []
+  );
 
   return {
+    activeCelebration: active,
+    dismissCelebration: dismissCurrentCelebration,
+    triggerCelebration,
     triggerReward,
-    triggerCorrect,
-    triggerGentleWrong,
-    triggerCombo,
-    triggerLevelUp,
-    triggerChestOpen,
-    triggerMonsterHit,
-    triggerMonsterDefeat,
+    triggerCorrect: () => triggerReward({ type: 'CORRECT_ANSWER' }),
+    triggerGentleWrong: () => triggerReward({ type: 'WRONG_ANSWER' }),
+    triggerCombo: (comboCount = 1) => triggerReward({ type: 'COMBO_STEP', comboCount }),
+    triggerLevelUp: () => triggerReward({ type: 'LEVEL_UP' }),
+    triggerChestOpen: (rarity: 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY' = 'COMMON') =>
+      triggerReward({ type: 'CHEST_OPEN', rarity }),
+    triggerMonsterHit: () => triggerReward({ type: 'MONSTER_HIT' }),
+    triggerMonsterDefeat: () => triggerReward({ type: 'MONSTER_DEFEAT' }),
   };
 }

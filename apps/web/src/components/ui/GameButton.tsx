@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { sound } from '../../lib/sound-manager';
+import { Pressable } from './Pressable';
+import { PressableRole } from '../../lib/sound-manager';
 
 export type GameButtonVariant =
   | 'gold'
@@ -20,6 +21,7 @@ export interface GameButtonProps extends React.ButtonHTMLAttributes<HTMLButtonEl
   icon?: React.ReactNode;
   children: React.ReactNode;
   fullWidth?: boolean;
+  disabledReason?: string;
 }
 
 export function GameButton({
@@ -31,15 +33,9 @@ export function GameButton({
   onClick,
   className = '',
   disabled = false,
+  disabledReason,
   ...rest
 }: GameButtonProps) {
-  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (!disabled) {
-      sound.playTap();
-      if (onClick) onClick(e);
-    }
-  };
-
   const baseStyles =
     'btn-3d inline-flex items-center justify-center font-display uppercase tracking-wider rounded-2xl select-none cursor-pointer focus:outline-none focus-visible:ring-4 focus-visible:ring-realm-gold/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none';
 
@@ -68,17 +64,30 @@ export function GameButton({
     sky: 'bg-realm-sky text-realm-twilight shadow-button-3d-sky hover:bg-[#68D3F3] border-t border-white/30 font-bold',
   };
 
+  // Map to Pressable role for customized sound tick and ripple color
+  const role: PressableRole =
+    variant === 'danger' || variant === 'coral'
+      ? 'danger'
+      : variant === 'mint'
+      ? 'success'
+      : variant === 'secondary' || variant === 'plum' || variant === 'ghost'
+      ? 'secondary'
+      : 'primary';
+
   return (
-    <button
-      onClick={handleClick}
+    <Pressable
+      as="button"
+      role={role}
       disabled={disabled}
+      disabledReason={disabledReason}
+      onClick={onClick as any}
       className={`${baseStyles} ${sizeStyles[size]} ${variantStyles[resolvedVariant]} ${
         fullWidth ? 'w-full' : ''
       } ${className}`}
-      {...rest}
+      {...(rest as any)}
     >
       {icon && <span className="shrink-0">{icon}</span>}
       <span>{children}</span>
-    </button>
+    </Pressable>
   );
 }

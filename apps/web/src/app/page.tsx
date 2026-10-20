@@ -28,6 +28,9 @@ import { soundManager } from '../lib/sound-manager';
 import { useReward } from '../lib/use-reward';
 import { api, setAccessToken } from '../lib/api';
 import { Zap, Flame, Gift, RotateCcw, Sparkles, LogIn, KeyRound, Mail, CheckCircle2 } from 'lucide-react';
+import { WeeklyRecapModal } from '../components/modals/WeeklyRecapModal';
+import { KeyboardShortcutsModal } from '../components/modals/KeyboardShortcutsModal';
+import { AchievementToastQueue } from '../components/notifications/AchievementToastQueue';
 
 export type AppTab = StudentGameTab | 'FACULTY' | 'STORYBOOK';
 
@@ -48,6 +51,7 @@ export default function Home() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [isDyslexic, setIsDyslexic] = useState(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
+  const [isWeeklyRecapOpen, setIsWeeklyRecapOpen] = useState(false);
 
   // Active Quiz & Modal States
   const [quizState, setQuizState] = useState<'IDLE' | 'ACTIVE' | 'COMPLETED'>('IDLE');
@@ -739,6 +743,28 @@ export default function Home() {
         onClose={() => setIsFeedbackOpen(false)}
         user={user}
       />
+
+      {/* 12. Weekly Recap Story Modal */}
+      <WeeklyRecapModal
+        isOpen={isWeeklyRecapOpen}
+        onClose={() => setIsWeeklyRecapOpen(false)}
+        data={{
+          studentName: user?.name || 'Scholar',
+          anonymousMode: user?.privacySettings?.anonymousMode,
+          totalXp: profile?.weeklyXp || 485,
+          bestDay: { day: 'Wednesday', xp: 140 },
+          monstersDefeated: 6,
+          codingSolves: 5,
+          streakDays: profile?.currentStreak || 7,
+          biggestImprovement: 'Binary Trees & BFS Traversal (+40% accuracy)',
+        }}
+      />
+
+      {/* 13. Keyboard Shortcuts Listener & Cheatsheet Modal */}
+      <KeyboardShortcutsModal onNavigateTab={(tab) => setCurrentTab(tab as any)} />
+
+      {/* 14. Achievement Toasts Queue System */}
+      <AchievementToastQueue />
     </div>
   );
 }
